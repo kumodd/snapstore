@@ -3,6 +3,7 @@ import { get as idbGet, set as idbSet } from 'idb-keyval'
 import { supabase } from '../lib/supabase'
 import { useEditorStore } from '../stores/editorStore'
 import { useAuthStore } from '../stores/authStore'
+import { useSlideStore } from '../stores/slideStore'
 
 const LOCAL_DRAFT_PREFIX = 'snapstore_draft_'
 const SERVER_SYNC_INTERVAL_MS = 30_000
@@ -18,6 +19,7 @@ export function useAutosave() {
     setIsDirty,
   } = useEditorStore()
   const { user } = useAuthStore()
+  const { activeSlideId, slides, saveActiveSlide } = useSlideStore()
 
   const localTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const serverTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -66,24 +68,22 @@ export function useAutosave() {
   // Save to Supabase server (every 30s if dirty and online)
   const saveToServer = useCallback(async () => {
     if (!isDirty || !projectId || !user || !isOnline.current) return
-    const json = getCanvasJSON()
-    if (!json) return
 
     setSaveStatus('saving')
     try {
+      // If project has slides, save the active slide canvas state
+      if (activeSlideId && fabricCanvas) {
+        await saveActiveSlide(fabricCanvas)
+      }
+
+      // Update project metadata (slide_count, updated_at)
+      // For multi-slide projects canvas_state stays null (slides table is canonical)
       const { error } = await (supabase as any).from('projects').update({
-        canvas_state: json,
+        slide_count: slides.length || 1,
         updated_at: new Date().toISOString(),
       }).eq('id', projectId)
 
       if (error) throw error
-
-      // Insert version snapshot
-      await (supabase as any).from('project_versions').insert({
-        project_id: projectId,
-        canvas_state: json,
-        version_number: Date.now(),
-      })
 
       const now = new Date()
       setSaveStatus('saved')
@@ -93,7 +93,7 @@ export function useAutosave() {
       console.error('Server save failed:', err)
       setSaveStatus('error')
     }
-  }, [isDirty, projectId, user, getCanvasJSON, setSaveStatus, setLastSavedAt, setIsDirty])
+  }, [isDirty, projectId, user, fabricCanvas, activeSlideId, slides, saveActiveSlide, setSaveStatus, setLastSavedAt, setIsDirty])
 
   // Flush local IndexedDB draft to server (called on reconnect)
   const flushLocalDraft = useCallback(async () => {

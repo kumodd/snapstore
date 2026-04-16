@@ -19,6 +19,8 @@ import ExportPanel from '../../components/panels/ExportPanel'
 import TemplatesPanel from '../../components/panels/TemplatesPanel'
 import AssetsPanel from '../../components/panels/AssetsPanel'
 import AIComposerPanel from '../../components/ai/AIComposerPanel'
+import SlideTimeline from '../../components/editor/SlideTimeline'
+import { useSlideStore } from '../../stores/slideStore'
 import type { Project } from '../../lib/database.types'
 import toast from 'react-hot-toast'
 import clsx from 'clsx'
@@ -49,6 +51,8 @@ export default function EditorPage() {
     isAIOpen, setIsAIOpen,
     resetEditor,
   } = useEditorStore()
+
+  const { loadSlides, addSlide, reset: resetSlides } = useSlideStore()
 
   useAutosave()
   const [project, setProject] = useState<Project | null>(null)
@@ -85,16 +89,55 @@ export default function EditorPage() {
     }
 
     loadProject()
-    return () => resetEditor()
+    return () => {
+      resetEditor()
+      resetSlides()
+    }
   }, [projectId])
 
   // Load canvas state when both project and fabric canvas are ready
+  // For multi-slide projects, load slides; for legacy single-canvas projects, migrate on the fly
   useEffect(() => {
-    if (!fabricCanvas || !project?.canvas_state) return
-    fabricCanvas.loadFromJSON(project.canvas_state as any).then(() => {
-      fabricCanvas.renderAll()
-    })
-  }, [fabricCanvas, project?.canvas_state])
+    if (!fabricCanvas || !project) return
+
+    const initSlides = async () => {
+      // Load existing slides
+      await loadSlides(project.id)
+
+      const { slides } = useSlideStore.getState()
+
+      if (slides.length === 0) {
+        // Legacy project: has canvas_state but no slides — migrate
+        if (project.canvas_state) {
+          const { data } = await supabase.from('slides').insert({
+            project_id: project.id,
+            position: 0,
+            title: 'Main',
+            canvas_state: project.canvas_state,
+          }).select().single()
+
+          if (data) {
+            useSlideStore.setState({ slides: [data], activeSlideId: data.id })
+          }
+          // Load the migrated canvas
+          await fabricCanvas.loadFromJSON(project.canvas_state as any)
+          fabricCanvas.renderAll()
+        } else {
+          // Brand new project — create first slide
+          if (fabricCanvas) await addSlide(project.id, fabricCanvas)
+        }
+      } else {
+        // Load the first (active) slide
+        const firstSlide = slides[0]
+        if (firstSlide?.canvas_state && Object.keys(firstSlide.canvas_state).length > 0) {
+          await fabricCanvas.loadFromJSON(firstSlide.canvas_state as any)
+          fabricCanvas.renderAll()
+        }
+      }
+    }
+
+    initSlides()
+  }, [fabricCanvas, project])
 
   // Add objects based on active tool click
   const handleCanvasToolClick = useCallback((toolId: string) => {
@@ -401,22 +444,27 @@ export default function EditorPage() {
         </div>
 
         {/* ── Canvas Area ───────────────────────────────────── */}
-        <div className="flex-1 relative overflow-hidden">
-          <FabricCanvasComponent />
+        <div className="flex-1 flex flex-col overflow-hidden relative">
+          <div className="flex-1 relative overflow-hidden">
+            <FabricCanvasComponent />
 
-          {/* AI Panel overlay */}
-          <AnimatePresence>
-            {isAIOpen && (
-              <motion.div
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 20 }}
-                className="absolute top-4 right-4 w-80 z-30"
-              >
-                <AIComposerPanel projectId={projectId!} />
-              </motion.div>
-            )}
-          </AnimatePresence>
+            {/* AI Panel overlay */}
+            <AnimatePresence>
+              {isAIOpen && (
+                <motion.div
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 20 }}
+                  className="absolute top-4 right-4 w-80 z-30"
+                >
+                  <AIComposerPanel projectId={projectId!} />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Slide Timeline */}
+          {projectId && <SlideTimeline projectId={projectId} />}
         </div>
 
         {/* ── Right Sidebar ─────────────────────────────────── */}
