@@ -1,6 +1,6 @@
-import { useRef } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { useEditorStore } from '../../stores/editorStore'
-import { AlignLeft, AlignCenter, AlignRight, Bold, Italic } from 'lucide-react'
+import { AlignLeft, AlignCenter, AlignRight, Bold, Italic, ChevronDown } from 'lucide-react'
 import clsx from 'clsx'
 import { Rect } from 'fabric'
 
@@ -21,19 +21,24 @@ const WEIGHTS = [
   { label: 'Extrabold', value: '800' }
 ]
 
-// Tracks which color picker is open
-type PickerOpen = 'fill' | 'stroke' | 'none'
+// Use a proper union type for all dropdown states
+type DropdownId = 'fill' | 'stroke' | 'font' | 'weight' | null
 
 export default function PropertiesPanel() {
   const { selectedObjects, fabricCanvas, setIsDirty } = useEditorStore()
-  const pickerOpen = useRef<PickerOpen>('none')
-  const forceUpdate = useEditorStore(s => s.setSelectedObjects)
 
-  const origFill = useRef<string>('')
-  const origStroke = useRef<string>('')
-  const origFontFamily = useRef<string>('')
-  const origFontWeight = useRef<string>('')
+  // Use React state for dropdown visibility — no more ref hacks
+  const [openDropdown, setOpenDropdown] = useState<DropdownId>(null)
 
+  // Refs to track the "true original" value before any hover preview started
+  const origFill = useRef<string | null>(null)
+  const origStroke = useRef<string | null>(null)
+  const origFontFamily = useRef<string | null>(null)
+  const origFontWeight = useRef<string | null>(null)
+
+  // Counter to force re-reads of object props after mutations
+  const [, setTick] = useState(0)
+  const refresh = useCallback(() => setTick(t => t + 1), [])
 
   if (selectedObjects.length === 0) {
     return (
@@ -47,27 +52,34 @@ export default function PropertiesPanel() {
   const type = obj.type
   const isMockupGroup = type === 'group' && obj.name?.startsWith('Mockup:')
 
-  /** Apply a property immediately and mark the project dirty */
+  // ── Helpers ─────────────────────────────────────────────────────────
+
+  /** Apply a property, render, mark dirty, and refresh the panel */
   const update = (props: Record<string, unknown>) => {
     obj.set(props)
     obj.setCoords?.()
     fabricCanvas?.renderAll()
     setIsDirty(true)
+    refresh()
   }
 
-  /** Live preview a property WITHOUT committing or marking dirty */
-  const previewProp = (key: string, value: any) => {
+  /** Preview a property on canvas WITHOUT marking dirty */
+  const preview = (key: string, value: any) => {
     obj.set(key, value)
     fabricCanvas?.renderAll()
   }
 
-  /** Revert to original WITHOUT marking dirty */
-  const revertProp = (key: string, value: any) => {
+  /** Revert a previewed property back to its original */
+  const revert = (key: string, value: any) => {
     obj.set(key, value)
     fabricCanvas?.renderAll()
   }
 
-  // ── Scaled Width/Height handling ────────────────────────────────────
+  const toggleDropdown = (id: DropdownId) => {
+    setOpenDropdown(prev => prev === id ? null : id)
+  }
+
+  // ── Scaled W/H ──────────────────────────────────────────────────────
   const scaledW = Math.round(obj.getScaledWidth?.() ?? obj.width ?? 0)
   const scaledH = Math.round(obj.getScaledHeight?.() ?? obj.height ?? 0)
 
@@ -75,11 +87,8 @@ export default function PropertiesPanel() {
     if (value <= 0) return
     const rawW = obj.width ?? 1
     const rawH = obj.height ?? 1
-    if (dim === 'w') {
-      update({ scaleX: value / rawW })
-    } else {
-      update({ scaleY: value / rawH })
-    }
+    if (dim === 'w') update({ scaleX: value / rawW })
+    else update({ scaleY: value / rawH })
   }
 
   const updateCornerRadius = (radius: number) => {
@@ -87,41 +96,89 @@ export default function PropertiesPanel() {
       update({ rx: radius, ry: radius })
     } else if (type === 'image') {
       const clipRect = new Rect({
-        width: obj.width,
-        height: obj.height,
-        rx: radius,
-        ry: radius,
-        originX: 'center',
-        originY: 'center',
+        width: obj.width, height: obj.height,
+        rx: radius, ry: radius,
+        originX: 'center', originY: 'center',
       })
       obj.set({ clipPath: clipRect, _customRx: radius })
       fabricCanvas?.renderAll()
       setIsDirty(true)
+      refresh()
     }
   }
 
-  const openPicker = (p: PickerOpen) => {
-    pickerOpen.current = pickerOpen.current === p ? 'none' : p
-    forceUpdate([...selectedObjects])
-  }
-
+  // ── Stroke helpers ──────────────────────────────────────────────────
   const currentStroke = isMockupGroup
     ? (obj.getObjects()[1]?.stroke ?? 'transparent')
     : (obj.stroke ?? 'transparent')
 
-  const applyStrokeChange = (val: string, commit = false) => {
-    if (isMockupGroup) {
-      obj.getObjects()[1]?.set({ stroke: val })
-    } else {
-      obj.set({ stroke: val })
-    }
+  const applyStroke = (val: string, commit = false) => {
+    if (isMockupGroup) obj.getObjects()[1]?.set({ stroke: val })
+    else obj.set({ stroke: val })
     fabricCanvas?.renderAll()
-    if (commit) setIsDirty(true)
+    if (commit) { setIsDirty(true); refresh() }
   }
 
+  // ── Color swatch grid (reusable for fill and stroke) ────────────────
+  const ColorGrid = ({
+    onSelect,
+    onHoverStart,
+    onHoverEnd,
+    currentColor,
+    customDefault,
+  }: {
+    onSelect: (c: string) => void
+    onHoverStart: (c: string) => void
+    onHoverEnd: () => void
+    currentColor: string
+    customDefault: string
+  }) => (
+    <div
+      className="absolute top-10 left-0 z-50 p-2.5 bg-surface-800 border border-surface-700 rounded-xl shadow-xl w-[180px]"
+      onMouseDown={e => e.stopPropagation()} // prevent dropdown close
+    >
+      <div className="grid grid-cols-5 gap-1.5 mb-2">
+        {PREDEFINED_COLORS.map(c => (
+          <button
+            key={c}
+            onMouseEnter={() => onHoverStart(c)}
+            onMouseLeave={onHoverEnd}
+            onClick={() => onSelect(c)}
+            className={clsx(
+              'w-6 h-6 rounded-md hover:scale-125 transition-transform border border-surface-600/50 hover:ring-2 hover:ring-white/50',
+              c === 'transparent' && 'bg-gradient-to-br from-gray-300 to-white'
+            )}
+            style={{ backgroundColor: c !== 'transparent' ? c : undefined }}
+            title={c}
+          />
+        ))}
+      </div>
+      <div className="pt-1.5 border-t border-surface-700">
+        <label className="text-[9px] text-surface-500 uppercase tracking-wider block mb-1">Custom Color</label>
+        <input
+          type="color"
+          defaultValue={currentColor && currentColor !== 'transparent' ? currentColor : customDefault}
+          onInput={e => {
+            // Live preview as the user drags the pointer — do NOT close the picker
+            const val = (e.target as HTMLInputElement).value
+            onHoverStart(val)
+          }}
+          onChange={e => {
+            // Final commit when the native picker is closed
+            onSelect(e.target.value)
+          }}
+          className="w-full h-8 rounded-lg cursor-pointer bg-transparent border border-surface-600"
+        />
+      </div>
+    </div>
+  )
+
   return (
-    <div className="space-y-0">
-      {/* Position & size */}
+    <div className="space-y-0" onMouseDown={() => {
+      // Close all dropdowns when clicking outside them
+      // (the dropdown containers use stopPropagation to prevent this)
+    }}>
+      {/* ── Transform ──────────────────────────────────────────────── */}
       <div className="panel-section">
         <p className="panel-section-title">Transform</p>
         <div className="grid grid-cols-2 gap-2">
@@ -131,55 +188,40 @@ export default function PropertiesPanel() {
           ].map(field => (
             <div key={field.key}>
               <label className="label">{field.label}</label>
-              <input
-                type="number"
-                value={field.value}
+              <input type="number" value={field.value}
                 onChange={e => update({ [field.key]: parseFloat(e.target.value) })}
-                className="input-sm text-right"
-              />
+                className="input-sm text-right" />
             </div>
           ))}
           <div>
             <label className="label">W</label>
-            <input
-              type="number"
-              value={scaledW}
+            <input type="number" value={scaledW}
               onChange={e => updateSize('w', parseFloat(e.target.value))}
-              className="input-sm text-right"
-            />
+              className="input-sm text-right" />
           </div>
           <div>
             <label className="label">H</label>
-            <input
-              type="number"
-              value={scaledH}
+            <input type="number" value={scaledH}
               onChange={e => updateSize('h', parseFloat(e.target.value))}
-              className="input-sm text-right"
-            />
+              className="input-sm text-right" />
           </div>
         </div>
         <div className="mt-2">
           <label className="label">Rotation</label>
-          <input
-            type="number"
-            value={Math.round(obj.angle ?? 0)}
+          <input type="number" value={Math.round(obj.angle ?? 0)}
             onChange={e => update({ angle: parseFloat(e.target.value) })}
-            className="input-sm"
-          />
+            className="input-sm" />
         </div>
         <div className="mt-2">
           <label className="label">Opacity ({Math.round((obj.opacity ?? 1) * 100)}%)</label>
-          <input
-            type="range"
-            min={0} max={1} step={0.01}
+          <input type="range" min={0} max={1} step={0.01}
             value={obj.opacity ?? 1}
             onChange={e => update({ opacity: parseFloat(e.target.value) })}
-            className="w-full accent-brand-500"
-          />
+            className="w-full accent-brand-500" />
         </div>
       </div>
 
-      {/* Fill color */}
+      {/* ── Fill / Text Color ──────────────────────────────────────── */}
       {(type === 'rect' || type === 'circle' || type === 'i-text' || type === 'textbox') && (
         <div className="panel-section">
           <p className="panel-section-title">{type.includes('text') ? 'Text Color' : 'Fill'}</p>
@@ -187,87 +229,69 @@ export default function PropertiesPanel() {
             <div
               className="w-8 h-8 rounded-lg border-2 border-surface-600 cursor-pointer flex-shrink-0"
               style={{ backgroundColor: obj.fill as string ?? '#6171f6' }}
-              onClick={() => openPicker('fill')}
+              onClick={() => toggleDropdown('fill')}
             />
-            {pickerOpen.current === 'fill' && (
-              <div className="absolute top-10 left-0 z-50 p-2.5 bg-surface-800 border border-surface-700 rounded-xl shadow-xl w-[156px]">
-                <div className="grid grid-cols-5 gap-1.5 mb-2">
-                  {PREDEFINED_COLORS.map(c => (
-                    <button
-                      key={c}
-                      onMouseEnter={() => {
-                        origFill.current = obj.fill ?? '#6171f6'
-                        previewProp('fill', c)
-                      }}
-                      onMouseLeave={() => revertProp('fill', origFill.current)}
-                      onClick={() => { update({ fill: c }); openPicker('none') }}
-                      className={clsx(
-                        'w-5 h-5 rounded-md hover:scale-125 transition-transform border border-surface-600/50 ring-0 hover:ring-2 hover:ring-white/50',
-                        c === 'transparent' && 'bg-gradient-to-br from-gray-300 to-white'
-                      )}
-                      style={{ backgroundColor: c !== 'transparent' ? c : undefined }}
-                      title={c}
-                    />
-                  ))}
-                </div>
-                <div className="flex items-center gap-1.5 pt-1.5 border-t border-surface-700">
-                  <label className="text-[9px] text-surface-500 uppercase tracking-wider flex-shrink-0">Custom</label>
-                  <input
-                    type="color"
-                    defaultValue={typeof obj.fill === 'string' && obj.fill !== 'transparent' ? obj.fill : '#6171f6'}
-                    onInput={e => previewProp('fill', (e.target as HTMLInputElement).value)}
-                    onChange={e => { update({ fill: e.target.value }); openPicker('none') }}
-                    className="w-full h-6 rounded cursor-pointer bg-transparent"
-                  />
-                </div>
-              </div>
+            {openDropdown === 'fill' && (
+              <ColorGrid
+                currentColor={obj.fill as string ?? '#6171f6'}
+                customDefault="#6171f6"
+                onHoverStart={c => {
+                  if (origFill.current === null) origFill.current = obj.fill ?? '#6171f6'
+                  preview('fill', c)
+                }}
+                onHoverEnd={() => {
+                  if (origFill.current !== null) revert('fill', origFill.current)
+                }}
+                onSelect={c => {
+                  update({ fill: c })
+                  origFill.current = null
+                  setOpenDropdown(null)
+                }}
+              />
             )}
-            <input
-              type="text"
+            <input type="text"
               value={(obj.fill as string) ?? '#6171f6'}
               onChange={e => update({ fill: e.target.value })}
               className="input-sm flex-1 font-mono"
-              placeholder="#6171f6"
-            />
+              placeholder="#6171f6" />
           </div>
         </div>
       )}
 
-      {/* Text specific */}
+      {/* ── Typography ─────────────────────────────────────────────── */}
       {(type === 'i-text' || type === 'textbox') && (
         <div className="panel-section space-y-2">
           <p className="panel-section-title">Typography</p>
+
+          {/* Font Family */}
           <div className="relative">
             <label className="label">Font Family</label>
             <button
               className="input-sm w-full text-left flex items-center justify-between"
-              onClick={() => openPicker(pickerOpen.current === 'fill' ? 'fill' : 'none')}
-              onClickCapture={() => {
-                // Toggle a custom font picker state using rerender trick
-                const next = pickerOpen.current === ('font' as any) ? 'none' : 'font'
-                pickerOpen.current = next as any
-                forceUpdate([...selectedObjects])
-              }}
+              onClick={() => toggleDropdown('font')}
             >
               <span style={{ fontFamily: obj.fontFamily ?? 'Inter' }}>{obj.fontFamily ?? 'Inter'}</span>
+              <ChevronDown className="w-3 h-3 text-surface-500" />
             </button>
-            {(pickerOpen.current as any) === 'font' && (
-              <div className="absolute top-14 left-0 w-full z-50 bg-surface-800 border border-surface-700 rounded-xl shadow-xl max-h-60 overflow-y-auto no-scrollbar py-1">
+            {openDropdown === 'font' && (
+              <div
+                className="absolute top-14 left-0 w-full z-50 bg-surface-800 border border-surface-700 rounded-xl shadow-xl max-h-60 overflow-y-auto no-scrollbar py-1"
+                onMouseDown={e => e.stopPropagation()}
+              >
                 {FONTS.map(f => (
                   <button
                     key={f}
                     onMouseEnter={() => {
-                      if (origFontFamily.current === '') origFontFamily.current = obj.fontFamily ?? 'Inter'
-                      previewProp('fontFamily', f)
+                      if (origFontFamily.current === null) origFontFamily.current = obj.fontFamily ?? 'Inter'
+                      preview('fontFamily', f)
                     }}
                     onMouseLeave={() => {
-                      revertProp('fontFamily', origFontFamily.current)
+                      if (origFontFamily.current !== null) revert('fontFamily', origFontFamily.current)
                     }}
                     onClick={() => {
                       update({ fontFamily: f })
-                      origFontFamily.current = f
-                      pickerOpen.current = 'none'
-                      forceUpdate([...selectedObjects])
+                      origFontFamily.current = null
+                      setOpenDropdown(null)
                     }}
                     className={clsx(
                       'w-full text-left px-3 py-1.5 text-sm hover:bg-surface-700 transition-colors',
@@ -281,46 +305,46 @@ export default function PropertiesPanel() {
               </div>
             )}
           </div>
+
+          {/* Font Size + Weight */}
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="label">Size</label>
-              <input
-                type="number"
-                value={obj.fontSize ?? 32}
-                onChange={e => update({ fontSize: parseInt(e.target.value) })}
-                className="input-sm"
-              />
+              <input type="number" value={obj.fontSize ?? 32}
+                onChange={e => update({ fontSize: parseInt(e.target.value) || 16 })}
+                className="input-sm" />
             </div>
             <div className="relative">
               <label className="label">Weight</label>
-              <button
-                className="input-sm w-full text-left"
-                onClick={() => {
-                  pickerOpen.current = pickerOpen.current === ('weight' as any) ? 'none' : 'weight' as any
-                  forceUpdate([...selectedObjects])
-                }}
+              <button className="input-sm w-full text-left flex items-center justify-between"
+                onClick={() => toggleDropdown('weight')}
               >
-                {WEIGHTS.find(w => w.value === (obj.fontWeight ?? 'normal'))?.label ?? 'Regular'}
+                <span>{WEIGHTS.find(w => w.value === String(obj.fontWeight ?? 'normal'))?.label ?? 'Regular'}</span>
+                <ChevronDown className="w-3 h-3 text-surface-500" />
               </button>
-              {(pickerOpen.current as any) === 'weight' && (
-                <div className="absolute top-14 left-0 w-full z-50 bg-surface-800 border border-surface-700 rounded-xl shadow-xl py-1">
+              {openDropdown === 'weight' && (
+                <div
+                  className="absolute top-14 left-0 w-full z-50 bg-surface-800 border border-surface-700 rounded-xl shadow-xl py-1"
+                  onMouseDown={e => e.stopPropagation()}
+                >
                   {WEIGHTS.map(w => (
                     <button
                       key={w.value}
                       onMouseEnter={() => {
-                        if (origFontWeight.current === '') origFontWeight.current = obj.fontWeight ?? 'normal'
-                        previewProp('fontWeight', w.value)
+                        if (origFontWeight.current === null) origFontWeight.current = String(obj.fontWeight ?? 'normal')
+                        preview('fontWeight', w.value)
                       }}
-                      onMouseLeave={() => revertProp('fontWeight', origFontWeight.current)}
+                      onMouseLeave={() => {
+                        if (origFontWeight.current !== null) revert('fontWeight', origFontWeight.current)
+                      }}
                       onClick={() => {
                         update({ fontWeight: w.value })
-                        origFontWeight.current = w.value
-                        pickerOpen.current = 'none'
-                        forceUpdate([...selectedObjects])
+                        origFontWeight.current = null
+                        setOpenDropdown(null)
                       }}
                       className={clsx(
                         'w-full text-left px-3 py-1.5 text-sm hover:bg-surface-700 transition-colors',
-                        obj.fontWeight === w.value ? 'text-brand-400 font-semibold' : 'text-surface-200'
+                        String(obj.fontWeight) === w.value ? 'text-brand-400 font-semibold' : 'text-surface-200'
                       )}
                       style={{ fontWeight: w.value }}
                     >
@@ -331,15 +355,26 @@ export default function PropertiesPanel() {
               )}
             </div>
           </div>
+
+          {/* Line Height */}
+          <div>
+            <label className="label">Line Height</label>
+            <input type="number" step={0.1} min={0.5} max={4}
+              value={obj.lineHeight ?? 1.2}
+              onChange={e => update({ lineHeight: parseFloat(e.target.value) || 1.2 })}
+              className="input-sm" />
+          </div>
+
+          {/* Letter Spacing */}
           <div>
             <label className="label">Letter Spacing</label>
-            <input
-              type="number"
+            <input type="number"
               value={obj.charSpacing ?? 0}
-              onChange={e => update({ charSpacing: parseInt(e.target.value) })}
-              className="input-sm"
-            />
+              onChange={e => update({ charSpacing: parseInt(e.target.value) || 0 })}
+              className="input-sm" />
           </div>
+
+          {/* Alignment */}
           <div>
             <label className="label">Alignment</label>
             <div className="flex items-center gap-1">
@@ -348,8 +383,7 @@ export default function PropertiesPanel() {
                 { icon: AlignCenter, value: 'center' },
                 { icon: AlignRight, value: 'right' },
               ].map(align => (
-                <button
-                  key={align.value}
+                <button key={align.value}
                   onClick={() => update({ textAlign: align.value })}
                   className={clsx(
                     'flex-1 py-1.5 rounded-lg flex items-center justify-center transition-colors',
@@ -363,29 +397,36 @@ export default function PropertiesPanel() {
               ))}
             </div>
           </div>
+
+          {/* Bold / Italic toggles */}
           <div className="flex gap-1">
-            {[
-              { icon: Bold, prop: 'fontWeight', value: 'bold', activeValue: 'bold' },
-              { icon: Italic, prop: 'fontStyle', value: 'italic', activeValue: 'italic' },
-            ].map(btn => (
-              <button
-                key={btn.prop}
-                onClick={() => update({ [btn.prop]: obj[btn.prop] === btn.activeValue ? 'normal' : btn.value })}
-                className={clsx(
-                  'flex-1 py-1.5 rounded-lg flex items-center justify-center transition-colors',
-                  obj[btn.prop] === btn.activeValue
-                    ? 'bg-brand-600 text-white'
-                    : 'bg-surface-800 text-surface-400 hover:text-surface-200'
-                )}
-              >
-                <btn.icon className="w-3.5 h-3.5" />
-              </button>
-            ))}
+            <button
+              onClick={() => update({ fontWeight: obj.fontWeight === 'bold' ? 'normal' : 'bold' })}
+              className={clsx(
+                'flex-1 py-1.5 rounded-lg flex items-center justify-center transition-colors',
+                obj.fontWeight === 'bold'
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-surface-800 text-surface-400 hover:text-surface-200'
+              )}
+            >
+              <Bold className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => update({ fontStyle: obj.fontStyle === 'italic' ? 'normal' : 'italic' })}
+              className={clsx(
+                'flex-1 py-1.5 rounded-lg flex items-center justify-center transition-colors',
+                obj.fontStyle === 'italic'
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-surface-800 text-surface-400 hover:text-surface-200'
+              )}
+            >
+              <Italic className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
       )}
 
-      {/* Shape stroke */}
+      {/* ── Stroke ─────────────────────────────────────────────────── */}
       {(type === 'rect' || type === 'circle' || isMockupGroup) && (
         <div className="panel-section space-y-2">
           <p className="panel-section-title">{isMockupGroup ? 'Mockup Frame Color' : 'Stroke'}</p>
@@ -396,54 +437,34 @@ export default function PropertiesPanel() {
                 <div
                   className="w-8 h-8 rounded-lg border-2 border-surface-600 cursor-pointer flex-shrink-0"
                   style={{ backgroundColor: currentStroke }}
-                  onClick={() => openPicker('stroke')}
+                  onClick={() => toggleDropdown('stroke')}
                 />
-                <input
-                  type="text"
-                  value={currentStroke}
-                  onChange={e => applyStrokeChange(e.target.value, true)}
-                  className="input-sm font-mono flex-1"
-                  placeholder="none"
-                />
+                <input type="text" value={currentStroke}
+                  onChange={e => applyStroke(e.target.value, true)}
+                  className="input-sm font-mono flex-1" placeholder="none" />
               </div>
-              {pickerOpen.current === 'stroke' && (
-                <div className="absolute top-14 left-0 z-50 p-2.5 bg-surface-800 border border-surface-700 rounded-xl shadow-xl w-[156px]">
-                  <div className="grid grid-cols-5 gap-1.5 mb-2">
-                    {PREDEFINED_COLORS.map(c => (
-                      <button
-                        key={c}
-                        onMouseEnter={() => {
-                          origStroke.current = currentStroke
-                          applyStrokeChange(c)
-                        }}
-                        onMouseLeave={() => applyStrokeChange(origStroke.current)}
-                        onClick={() => { applyStrokeChange(c, true); openPicker('none') }}
-                        className={clsx(
-                          'w-5 h-5 rounded-md hover:scale-125 transition-transform border border-surface-600/50 hover:ring-2 hover:ring-white/50',
-                          c === 'transparent' && 'bg-gradient-to-br from-gray-300 to-white'
-                        )}
-                        style={{ backgroundColor: c !== 'transparent' ? c : undefined }}
-                        title={c}
-                      />
-                    ))}
-                  </div>
-                  <div className="flex items-center gap-1.5 pt-1.5 border-t border-surface-700">
-                    <label className="text-[9px] text-surface-500 uppercase tracking-wider flex-shrink-0">Custom</label>
-                    <input
-                      type="color"
-                      defaultValue={currentStroke && currentStroke !== 'transparent' ? currentStroke : '#334155'}
-                      onInput={e => applyStrokeChange((e.target as HTMLInputElement).value)}
-                      onChange={e => { applyStrokeChange(e.target.value, true); openPicker('none') }}
-                      className="w-full h-6 rounded cursor-pointer bg-transparent"
-                    />
-                  </div>
-                </div>
+              {openDropdown === 'stroke' && (
+                <ColorGrid
+                  currentColor={currentStroke}
+                  customDefault="#334155"
+                  onHoverStart={c => {
+                    if (origStroke.current === null) origStroke.current = currentStroke
+                    applyStroke(c)
+                  }}
+                  onHoverEnd={() => {
+                    if (origStroke.current !== null) applyStroke(origStroke.current)
+                  }}
+                  onSelect={c => {
+                    applyStroke(c, true)
+                    origStroke.current = null
+                    setOpenDropdown(null)
+                  }}
+                />
               )}
             </div>
             <div>
               <label className="label">Width</label>
-              <input
-                type="number"
+              <input type="number"
                 value={(isMockupGroup ? obj.getObjects()[1]?.strokeWidth : obj.strokeWidth) as number ?? 0}
                 onChange={e => {
                   if (isMockupGroup) {
@@ -453,37 +474,31 @@ export default function PropertiesPanel() {
                     update({ strokeWidth: parseInt(e.target.value) || 0 })
                   }
                   setIsDirty(true)
+                  refresh()
                 }}
-                className="input-sm"
-              />
+                className="input-sm" />
             </div>
           </div>
           {type === 'rect' && (
             <div>
               <label className="label">Corner Radius</label>
-              <input
-                type="number"
-                value={obj.rx ?? 0}
+              <input type="number" value={obj.rx ?? 0}
                 onChange={e => updateCornerRadius(parseInt(e.target.value) || 0)}
-                className="input-sm"
-              />
+                className="input-sm" />
             </div>
           )}
         </div>
       )}
 
-      {/* Image Corner Radius */}
+      {/* ── Image Corner Radius ────────────────────────────────────── */}
       {type === 'image' && (
         <div className="panel-section space-y-2">
           <p className="panel-section-title">Image Styling</p>
           <div>
             <label className="label">Corner Radius</label>
-            <input
-              type="number"
-              value={obj._customRx ?? 0}
+            <input type="number" value={obj._customRx ?? 0}
               onChange={e => updateCornerRadius(parseInt(e.target.value) || 0)}
-              className="input-sm"
-            />
+              className="input-sm" />
           </div>
         </div>
       )}
