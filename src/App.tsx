@@ -20,6 +20,11 @@ function AuthCallback() {
   const navigate = useNavigate()
 
   useEffect(() => {
+    // Prevent premature redirect if Supabase is currently processing an OAuth hash
+    if (window.location.hash.includes('access_token')) {
+      return
+    }
+
     if (isInitialized) {
       if (user) {
         navigate('/dashboard', { replace: true })
