@@ -27,7 +27,7 @@ const SCALE_OPTIONS: Scale[] = [1, 2, 3]
 export default function ExportPanel({ onClose, projectName }: ExportPanelProps) {
   const { fabricCanvas } = useEditorStore()
   const { slides, activeSlideId } = useSlideStore()
-  const { user, plan, profile, canExport, refreshProfile } = useAuthStore()
+  const { user, profile, canExport, refreshProfile } = useAuthStore()
 
   const [format, setFormat] = useState<Format>('PNG')
   const [scale, setScale] = useState<Scale>(2)
