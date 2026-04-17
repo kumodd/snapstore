@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { Canvas as FabricCanvas, Point } from 'fabric'
 import { useEditorStore } from '../../stores/editorStore'
+import { useSlideStore } from '../../stores/slideStore'
 
 export default function FabricCanvasComponent() {
   const canvasElementRef = useRef<HTMLCanvasElement>(null)
@@ -162,6 +163,40 @@ export default function FabricCanvasComponent() {
     container.addEventListener('wheel', handleWheel, { passive: false })
     return () => container.removeEventListener('wheel', handleWheel)
   }, [fabricCanvas, setZoom])
+
+  // ── Save-on-blur: immediate save when user leaves the page ─────────
+  useEffect(() => {
+    // Import saveToServer lazily from the autosave hook via the store
+    const triggerSave = () => {
+      const { isDirty, fabricCanvas: fc } = useEditorStore.getState()
+      if (!isDirty || !fc) return
+      const { activeSlideId, saveActiveSlide } = useSlideStore.getState()
+      if (activeSlideId) {
+        saveActiveSlide(fc).catch(() => {})
+      }
+    }
+
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      const { isDirty } = useEditorStore.getState()
+      if (isDirty) {
+        triggerSave()
+        e.preventDefault()
+      }
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        triggerSave()
+      }
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [])
 
   return (
     <div

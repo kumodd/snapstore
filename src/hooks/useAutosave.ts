@@ -8,29 +8,47 @@ import { useSlideStore } from '../stores/slideStore'
 const LOCAL_DRAFT_PREFIX = 'snapstore_draft_'
 const SERVER_SYNC_INTERVAL_MS = 30_000
 const LOCAL_SYNC_INTERVAL_MS = 5_000
+const SAVE_TIMEOUT_MS = 15_000
+
+/**
+ * Race a promise against a timeout. Rejects if the timeout fires first.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v) },
+      (e) => { clearTimeout(timer); reject(e) },
+    )
+  })
+}
 
 export function useAutosave() {
+  // Only grab STABLE setter references from stores — never mutable values.
+  // Mutable values (isDirty, fabricCanvas, slides, etc.) are read eagerly
+  // from getState() inside each callback to avoid the dependency-cascade
+  // that was resetting the interval timer on every canvas change.
   const {
-    fabricCanvas,
-    projectId,
-    isDirty,
     setSaveStatus,
     setLastSavedAt,
     setIsDirty,
   } = useEditorStore()
-  const { user } = useAuthStore()
-  const { activeSlideId, slides, saveActiveSlide } = useSlideStore()
 
+  const projectIdRef = useRef<string | null>(null)
   const localTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const serverTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const isOnline = useRef(navigator.onLine)
+  const isSavingRef = useRef(false)
+
+  // Keep projectId in a ref so callbacks don't depend on it reactively
+  const projectId = useEditorStore(s => s.projectId)
+  useEffect(() => { projectIdRef.current = projectId }, [projectId])
 
   // Track online/offline state
   useEffect(() => {
     const handleOnline = () => {
       isOnline.current = true
       setSaveStatus('idle')
-      // Flush local draft to server on reconnect
       flushLocalDraft()
     }
     const handleOffline = () => {
@@ -43,65 +61,78 @@ export function useAutosave() {
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
     }
-  }, [projectId])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const getCanvasJSON = useCallback(() => {
-    if (!fabricCanvas) return null
-    return fabricCanvas.toJSON()
-  }, [fabricCanvas])
-
-  // Save to IndexedDB (offline-tolerant, every 5s if dirty)
+  // ── Save to IndexedDB (every 5s if dirty) ──────────────────────────
   const saveLocalDraft = useCallback(async () => {
-    if (!isDirty || !projectId) return
-    const json = getCanvasJSON()
-    if (!json) return
+    const { isDirty, fabricCanvas, projectId: pid } = useEditorStore.getState()
+    if (!isDirty || !pid || !fabricCanvas) return
     try {
-      await idbSet(`${LOCAL_DRAFT_PREFIX}${projectId}`, {
+      const json = fabricCanvas.toJSON()
+      await idbSet(`${LOCAL_DRAFT_PREFIX}${pid}`, {
         canvasState: json,
         savedAt: new Date().toISOString(),
       })
     } catch (err) {
       console.warn('Local draft save failed:', err)
     }
-  }, [isDirty, projectId, getCanvasJSON])
+  }, []) // stable — reads everything from getState()
 
-  // Save to Supabase server (every 30s if dirty and online)
+  // ── Save to Supabase (every 30s if dirty and online) ───────────────
   const saveToServer = useCallback(async () => {
-    if (!isDirty || !projectId || !user || !isOnline.current) return
+    // Read ALL mutable state eagerly inside the callback
+    const { isDirty, projectId: pid, fabricCanvas } = useEditorStore.getState()
+    const { user } = useAuthStore.getState()
+    const { activeSlideId, slides, saveActiveSlide } = useSlideStore.getState()
+
+    if (!isDirty || !pid || !user || !isOnline.current) return
+    if (isSavingRef.current) return // prevent overlapping saves
+    isSavingRef.current = true
 
     setSaveStatus('saving')
     try {
-      // If project has slides, save the active slide canvas state
+      // Save active slide canvas state with timeout protection
       if (activeSlideId && fabricCanvas) {
-        await saveActiveSlide(fabricCanvas)
+        await withTimeout(
+          saveActiveSlide(fabricCanvas),
+          SAVE_TIMEOUT_MS,
+          'saveActiveSlide'
+        )
       }
 
-      // Update project metadata (slide_count, updated_at)
-      // For multi-slide projects canvas_state stays null (slides table is canonical)
-      const { error } = await (supabase as any).from('projects').update({
-        slide_count: slides.length || 1,
-        updated_at: new Date().toISOString(),
-      }).eq('id', projectId)
+      // Update project metadata
+      const result: any = await withTimeout(
+        (supabase as any).from('projects').update({
+          slide_count: slides.length || 1,
+          updated_at: new Date().toISOString(),
+        }).eq('id', pid),
+        SAVE_TIMEOUT_MS,
+        'projects.update'
+      )
 
-      if (error) throw error
+      if (result?.error) throw result.error
 
-      const now = new Date()
       setSaveStatus('saved')
-      setLastSavedAt(now)
+      setLastSavedAt(new Date())
       setIsDirty(false)
     } catch (err) {
       console.error('Server save failed:', err)
       setSaveStatus('error')
+    } finally {
+      isSavingRef.current = false
     }
-  }, [isDirty, projectId, user, fabricCanvas, activeSlideId, slides, saveActiveSlide, setSaveStatus, setLastSavedAt, setIsDirty])
+  }, [setSaveStatus, setLastSavedAt, setIsDirty]) // only stable setters
 
-  // Flush local IndexedDB draft to server (called on reconnect)
+  // ── Flush local draft to server (on reconnect) ─────────────────────
   const flushLocalDraft = useCallback(async () => {
-    if (!projectId || !user || !fabricCanvas || !activeSlideId) return
+    const { projectId: pid, fabricCanvas } = useEditorStore.getState()
+    const { user } = useAuthStore.getState()
+    const { activeSlideId, saveActiveSlide } = useSlideStore.getState()
+
+    if (!pid || !user || !fabricCanvas || !activeSlideId) return
     try {
-      const draft = await idbGet(`${LOCAL_DRAFT_PREFIX}${projectId}`)
+      const draft = await idbGet(`${LOCAL_DRAFT_PREFIX}${pid}`)
       if (!draft) return
-      // Reload canvas from local draft, then save the active slide
       await fabricCanvas.loadFromJSON(draft.canvasState)
       fabricCanvas.renderAll()
       await saveActiveSlide(fabricCanvas)
@@ -111,9 +142,9 @@ export function useAutosave() {
     } catch (err) {
       console.warn('Flush draft failed:', err)
     }
-  }, [projectId, user, fabricCanvas, activeSlideId, saveActiveSlide, setSaveStatus, setLastSavedAt, setIsDirty])
+  }, [setSaveStatus, setLastSavedAt, setIsDirty])
 
-  // Load draft from IndexedDB on project open (before server response)
+  // ── Load draft from IndexedDB ──────────────────────────────────────
   const loadLocalDraft = useCallback(async (projId: string) => {
     try {
       const draft = await idbGet(`${LOCAL_DRAFT_PREFIX}${projId}`)
@@ -123,7 +154,7 @@ export function useAutosave() {
     }
   }, [])
 
-  // Set up intervals
+  // ── Set up intervals — deps are ONLY [projectId] ──────────────────
   useEffect(() => {
     if (!projectId) return
 
@@ -133,7 +164,7 @@ export function useAutosave() {
     return () => {
       if (localTimerRef.current) clearInterval(localTimerRef.current)
       if (serverTimerRef.current) clearInterval(serverTimerRef.current)
-      // Final save on unmount — only if there are unsaved changes
+      // Final save on unmount — only if dirty
       if (useEditorStore.getState().isDirty) saveToServer()
     }
   }, [projectId, saveLocalDraft, saveToServer])

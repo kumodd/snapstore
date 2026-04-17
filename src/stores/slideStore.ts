@@ -248,10 +248,15 @@ export const useSlideStore = create<SlideState>((set, get) => ({
     const json = serializeCanvas(fabricCanvas)
     const thumb = captureThumb(fabricCanvas)
 
-    await (supabase as any).from('slides').update({
+    const { error } = await (supabase as any).from('slides').update({
       canvas_state: json,
       thumbnail_b64: thumb,
     }).eq('id', activeSlideId)
+
+    if (error) {
+      console.error('saveActiveSlide failed:', error)
+      throw error
+    }
 
     set(prev => ({
       slides: prev.slides.map(s =>

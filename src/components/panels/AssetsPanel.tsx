@@ -21,14 +21,29 @@ export default function AssetsPanel() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [isDragOver, setIsDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const isLoadingRef = useRef(false) // guard against concurrent loads
 
+  // Depend on user.id (string) not user (object ref) to prevent
+  // redundant calls when auth token refreshes
+  const userId = user?.id
   useEffect(() => {
-    if (user) loadAssets()
-  }, [user])
+    if (userId) loadAssets()
+    else setIsLoading(false)
+  }, [userId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadAssets = async () => {
     if (!user) return
+    if (isLoadingRef.current) return // prevent concurrent loads
+    isLoadingRef.current = true
     setIsLoading(true)
+
+    // 10-second hard timeout — spinner can never hang forever
+    const timeout = setTimeout(() => {
+      console.warn('Asset load timed out')
+      isLoadingRef.current = false
+      setIsLoading(false)
+    }, 10_000)
+
     try {
       const { data: fileList, error } = await supabase.storage
         .from('project-assets')
@@ -36,24 +51,34 @@ export default function AssetsPanel() {
 
       if (error) throw error
 
-      if (fileList) {
+      if (fileList && fileList.length > 0) {
         const filtered = fileList.filter(f => f.name !== '.emptyFolderPlaceholder')
 
-        // Create signed URLs (1 hour expiry) for the private bucket
-        const signed = await Promise.all(
+        // Use allSettled so one failed URL can't block the entire load
+        const results = await Promise.allSettled(
           filtered.map(async (file) => {
             const { data, error } = await supabase.storage
               .from('project-assets')
               .createSignedUrl(`${user.id}/${file.name}`, 3600)
-            return { name: file.name, signedUrl: error ? '' : (data?.signedUrl ?? '') }
+            if (error || !data?.signedUrl) return null
+            return { name: file.name, signedUrl: data.signedUrl }
           })
         )
-        setAssets(signed.filter(a => a.signedUrl))
+        const signed = results
+          .filter((r): r is PromiseFulfilledResult<Asset | null> => r.status === 'fulfilled')
+          .map(r => r.value)
+          .filter((a): a is Asset => a !== null && !!a.signedUrl)
+        setAssets(signed)
+      } else {
+        setAssets([])
       }
     } catch (err: any) {
       console.error('Failed to load assets', err)
       toast.error('Could not load your assets')
+      setAssets([])
     } finally {
+      clearTimeout(timeout)
+      isLoadingRef.current = false
       setIsLoading(false)
     }
   }
