@@ -12,8 +12,16 @@
         if (redirect && redirect !== location.href) {
           history.replaceState(null, null, redirect);
         }
-        var p = new URLSearchParams(location.search).get('p');
-        if (p) history.replaceState(null, null, '/snapstore' + p);
+        var urlParams = new URLSearchParams(location.search);
+        var p = urlParams.get('p');
+        var q = urlParams.get('q');
+        var h = urlParams.get('h');
+        if (p) {
+          var newUrl = '/snapstore' + p;
+          if (q) newUrl += '?' + q;
+          if (h) newUrl += '#' + h;
+          history.replaceState(null, null, newUrl);
+        }
       })();
     </script>
 
