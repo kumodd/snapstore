@@ -9,7 +9,7 @@ import { Rect, IText, Image as FabricImage, Shadow, Group } from 'fabric'
 const CATEGORIES = ['All', 'Finance', 'Health', 'Gaming', 'Productivity', 'Social', 'Shopping', 'Travel', 'Education']
 
 export default function TemplatesPanel() {
-  const { fabricCanvas, selectedDevice, show3DFrame } = useEditorStore()
+  const { fabricCanvas, selectedDevice } = useEditorStore()
   const [templates, setTemplates] = useState<Template[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -131,7 +131,7 @@ export default function TemplatesPanel() {
         originX: 'center', originY: 'top',
         name: `Mockup: ${selectedDevice.name}`,
         selectable: false
-      })
+      } as any)
       group.scale(scale)
       if (type === 'premium') {
         group.set({ shadow: new Shadow({ color: 'rgba(0,0,0,0.3)', blur: 60, offsetX: 0, offsetY: 30 }) })
@@ -166,7 +166,7 @@ export default function TemplatesPanel() {
         originX: 'center', originY: 'top',
         name: `Mockup: ${selectedDevice.name}`,
         selectable: false
-      })
+      } as any)
       
       if (type === 'premium') {
         group.set({ shadow: new Shadow({ color: 'rgba(0,0,0,0.3)', blur: 60, offsetX: 0, offsetY: 30 }) })

@@ -2,10 +2,10 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  User, Mail, Camera, Lock, LogOut, Crown, Zap, Check,
-  Shield, Bell, Trash2, ChevronRight, AlertTriangle, Eye,
+  User, Camera, Lock, LogOut, Crown, Zap, Check,
+  Shield, Trash2, ChevronRight, AlertTriangle, Eye,
   EyeOff, Loader2, CheckCircle2, XCircle, BarChart3,
-  Package, Download, Calendar, RefreshCw, ExternalLink,
+  Package, Download, Calendar, ExternalLink,
   Edit3, Save, X
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'

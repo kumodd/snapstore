@@ -47,8 +47,8 @@ export default function LayersPanel() {
   const moveLayer = (obj: FabricObject, direction: 'up' | 'down', e: React.MouseEvent) => {
     e.stopPropagation()
     if (!fabricCanvas) return
-    if (direction === 'up') obj.bringForward()
-    else obj.sendBackwards()
+    if (direction === 'up') (obj as any).bringForward()
+    else (obj as any).sendBackwards()
     fabricCanvas.renderAll()
   }
 

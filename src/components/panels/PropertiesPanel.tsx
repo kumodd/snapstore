@@ -359,7 +359,7 @@ export default function PropertiesPanel() {
                         if (isMockupGroup) { obj.getObjects()[1].set({ stroke: val }); fabricCanvas?.renderAll() }
                         else update({ stroke: val })
                       }}
-                      onChange={e => { setShowStrokePicker(false) }}
+                      onChange={() => { setShowStrokePicker(false) }}
                       className="w-full h-6 rounded cursor-pointer bg-transparent"
                     />
                   </div>

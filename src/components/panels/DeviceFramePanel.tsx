@@ -70,7 +70,7 @@ export default function DeviceFramePanel() {
              originX: 'center',
              originY: 'center',
              name: `Mockup: ${selectedDevice.name}`
-          })
+          } as any)
           
           // Auto-scale to fit canvas
           const maxWidth = fabricCanvas.getWidth() * 0.95
