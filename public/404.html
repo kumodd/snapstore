@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>SnapStore</title>
+    <script>
+      // Redirect 404s back to index with the path preserved
+      var path = window.location.pathname;
+      var query = window.location.search.slice(1);
+      var hash = window.location.hash.slice(1);
+      var redirect = '/?p=' + encodeURIComponent(path.slice(1))
+        + (query ? '&q=' + encodeURIComponent(query) : '')
+        + (hash ? '&h=' + encodeURIComponent(hash) : '');
+      window.location.replace(redirect);
+    </script>
+  </head>
+</html>
