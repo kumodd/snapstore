@@ -2,6 +2,9 @@ import { useState } from 'react'
 import { X, Download, Image as ImageIcon, FileImage, Archive, Loader2, CheckCircle2 } from 'lucide-react'
 import { useEditorStore } from '../../stores/editorStore'
 import { useSlideStore } from '../../stores/slideStore'
+import { useAuthStore } from '../../stores/authStore'
+import { supabase } from '../../lib/supabase'
+import toast from 'react-hot-toast'
 import clsx from 'clsx'
 
 interface ExportPanelProps {
@@ -24,6 +27,7 @@ const SCALE_OPTIONS: Scale[] = [1, 2, 3]
 export default function ExportPanel({ onClose, projectName }: ExportPanelProps) {
   const { fabricCanvas } = useEditorStore()
   const { slides, activeSlideId } = useSlideStore()
+  const { user, plan, profile, canExport, refreshProfile } = useAuthStore()
 
   const [format, setFormat] = useState<Format>('PNG')
   const [scale, setScale] = useState<Scale>(2)
@@ -120,6 +124,12 @@ export default function ExportPanel({ onClose, projectName }: ExportPanelProps) 
   }
 
   const handleExport = async () => {
+    // ── Free-plan quota gate ──────────────────────────────────────────
+    if (!canExport()) {
+      toast.error('You\'ve reached your 10 exports/month limit. Upgrade to Indie for unlimited exports.')
+      return
+    }
+
     setIsExporting(true)
     setDone(false)
     try {
@@ -130,8 +140,20 @@ export default function ExportPanel({ onClose, projectName }: ExportPanelProps) 
       }
       setDone(true)
       setTimeout(() => setDone(false), 2500)
+
+      // ── Increment export counter in DB ───────────────────────────
+      if (user) {
+        const newCount = (profile?.export_count_this_month ?? 0) + 1
+        await (supabase as any)
+          .from('profiles')
+          .update({ export_count_this_month: newCount })
+          .eq('id', user.id)
+        // Refresh local profile so canExport() stays accurate
+        await refreshProfile()
+      }
     } catch (err) {
       console.error('Export failed:', err)
+      toast.error('Export failed. Please try again.')
     } finally {
       setIsExporting(false)
     }

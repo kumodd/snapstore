@@ -142,7 +142,7 @@ export default function DashboardPage() {
                 Admin
               </button>
             )}
-            {plan !== 'team' && (
+            {plan === 'free' && (
               <button
                 onClick={() => navigate('/pricing')}
                 className="btn-gradient btn-sm hidden sm:inline-flex"
@@ -187,7 +187,7 @@ export default function DashboardPage() {
                       { icon: User,     label: 'My Profile',    action: () => { navigate('/profile'); setAvatarMenuOpen(false) } },
                       { icon: Crown,    label: 'Subscription',  action: () => { navigate('/profile', { state: { tab: 'subscription' } }); setAvatarMenuOpen(false) } },
                       { icon: Settings, label: 'Settings',      action: () => { navigate('/profile', { state: { tab: 'security' } }); setAvatarMenuOpen(false) } },
-                      ...(plan !== 'team' ? [{ icon: Zap, label: 'Upgrade Plan', action: () => { navigate('/pricing'); setAvatarMenuOpen(false) } }] : []),
+                      ...(plan !== 'team' ? [{ icon: Zap, label: plan === 'free' ? 'Upgrade Plan' : plan === 'indie' ? 'Upgrade to Pro' : 'Upgrade to Team', action: () => { navigate('/pricing'); setAvatarMenuOpen(false) } }] : []),
                     ].map(item => (
                       <button key={item.label} onClick={item.action}
                         className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:text-white hover:bg-white/5 transition-colors text-left"
