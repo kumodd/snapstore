@@ -448,17 +448,18 @@ export default function EditorPage() {
           <div className="flex-1 relative flex items-center justify-center overflow-hidden">
             <FabricCanvasComponent />
 
-            {/* AI overlay */}
-            <AnimatePresence>
-              {isAIOpen && (
-                <motion.div
-                  initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}
-                  className="absolute top-4 right-4 w-80 z-30"
-                >
-                  <AIComposerPanel projectId={projectId!} />
-                </motion.div>
-              )}
-            </AnimatePresence>
+            {/* AI overlay — always mounted so state survives open/close */}
+            <motion.div
+              animate={{ opacity: isAIOpen ? 1 : 0, x: isAIOpen ? 0 : 20 }}
+              transition={{ duration: 0.18, ease: 'easeInOut' }}
+              className="absolute top-4 bottom-4 right-4 w-80 z-30"
+              style={{
+                pointerEvents: isAIOpen ? 'auto' : 'none',
+                visibility:    isAIOpen ? 'visible' : 'hidden',
+              }}
+            >
+              <AIComposerPanel projectId={projectId!} />
+            </motion.div>
 
             {/* Export overlay */}
             <AnimatePresence>

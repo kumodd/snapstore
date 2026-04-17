@@ -5,7 +5,7 @@ import {
   Plus, Search, Grid, List, MoreVertical, Star, Clock,
   Smartphone, Trash2, Copy, Settings, Sparkles, Zap,
   TrendingUp, Download, Users, ChevronRight, FolderOpen, ShieldAlert,
-  LogOut, User, Crown
+  LogOut, User, Crown, AlertTriangle
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
@@ -235,23 +235,73 @@ export default function DashboardPage() {
           ))}
         </div>
 
-        {/* Free plan usage bar */}
-        {plan === 'free' && (
-          <div className="card p-4 flex flex-col sm:flex-row sm:items-center gap-4">
-            <div className="flex-1 space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-surface-300">Projects <span className="text-white font-medium">{projects.length}/3</span></span>
-                <span className="text-surface-300">Exports this month <span className="text-white font-medium">{profile?.export_count_this_month ?? 0}/10</span></span>
-              </div>
-              <div className="h-1.5 bg-surface-800 rounded-full overflow-hidden flex gap-0.5">
-                <div className="h-full bg-brand-500 rounded-full transition-all" style={{ width: `${(projects.length / 3) * 100}%` }} />
+        {/* Free plan usage — proactive quota warnings */}
+        {plan === 'free' && (() => {
+          const projPct  = (projects.length / 3) * 100
+          const expUsed  = profile?.export_count_this_month ?? 0
+          const expPct   = (expUsed / 10) * 100
+          const projWarn = projPct >= 67   // 2/3 used
+          const expWarn  = expPct  >= 70   // 7/10 used
+          const projCrit = projPct >= 100
+          const expCrit  = expPct  >= 100
+          const barColor = (pct: number) =>
+            pct >= 100 ? '#ef4444' : pct >= 70 ? '#f59e0b' : '#6366f1'
+          return (
+            <div className={clsx(
+              'card p-4 space-y-3 transition-all',
+              (projCrit || expCrit) && 'border border-red-500/30',
+              (!projCrit && !expCrit && (projWarn || expWarn)) && 'border border-amber-500/25',
+            )}>
+              {/* Warning banner */}
+              {(projWarn || expWarn) && (
+                <div className={clsx(
+                  'flex items-center gap-2 text-xs rounded-lg px-3 py-2',
+                  (projCrit || expCrit) ? 'bg-red-500/10 text-red-300' : 'bg-amber-500/10 text-amber-300'
+                )}>
+                  <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span>
+                    {projCrit ? 'Project limit reached — ' : projWarn ? `${3 - projects.length} project slot${3 - projects.length === 1 ? '' : 's'} remaining — ` : ''}
+                    {expCrit  ? 'Export limit reached' : expWarn ? `${10 - expUsed} export${10 - expUsed === 1 ? '' : 's'} left this month` : ''}
+                  </span>
+                </div>
+              )}
+
+              <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+                <div className="flex-1 space-y-2.5">
+                  {/* Projects bar */}
+                  <div>
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className="text-surface-400">Projects</span>
+                      <span className={clsx('font-semibold', projCrit ? 'text-red-400' : projWarn ? 'text-amber-400' : 'text-white')}>
+                        {projects.length} / 3
+                      </span>
+                    </div>
+                    <div className="h-1.5 bg-surface-800 rounded-full overflow-hidden">
+                      <div className="h-full rounded-full transition-all duration-500"
+                        style={{ width: `${Math.min(projPct, 100)}%`, backgroundColor: barColor(projPct) }} />
+                    </div>
+                  </div>
+                  {/* Exports bar */}
+                  <div>
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className="text-surface-400">Exports this month</span>
+                      <span className={clsx('font-semibold', expCrit ? 'text-red-400' : expWarn ? 'text-amber-400' : 'text-white')}>
+                        {expUsed} / 10
+                      </span>
+                    </div>
+                    <div className="h-1.5 bg-surface-800 rounded-full overflow-hidden">
+                      <div className="h-full rounded-full transition-all duration-500"
+                        style={{ width: `${Math.min(expPct, 100)}%`, backgroundColor: barColor(expPct) }} />
+                    </div>
+                  </div>
+                </div>
+                <button onClick={() => navigate('/pricing')} className="btn-gradient btn-sm whitespace-nowrap flex-shrink-0">
+                  Upgrade to Indie <ChevronRight className="w-3 h-3" />
+                </button>
               </div>
             </div>
-            <button onClick={() => navigate('/pricing')} className="btn-gradient btn-sm whitespace-nowrap">
-              Upgrade to Indie — $9/mo <ChevronRight className="w-3 h-3" />
-            </button>
-          </div>
-        )}
+          )
+        })()}
 
         {/* Header row */}
         <div className="flex flex-col sm:flex-row sm:items-center gap-4">
