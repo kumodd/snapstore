@@ -1,13 +1,15 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   Plus, Search, Grid, List, MoreVertical, Star, Clock,
   Smartphone, Trash2, Copy, Settings, Sparkles, Zap,
-  TrendingUp, Download, Users, ChevronRight, FolderOpen
+  TrendingUp, Download, Users, ChevronRight, FolderOpen, ShieldAlert,
+  LogOut, User, Crown
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
+import { useAdminStore } from '../stores/adminStore'
 import type { Project } from '../lib/database.types'
 import { formatDistanceToNow } from 'date-fns'
 import toast from 'react-hot-toast'
@@ -18,7 +20,21 @@ type SortBy = 'updated_at' | 'created_at' | 'name'
 
 export default function DashboardPage() {
   const navigate = useNavigate()
-  const { profile, user, plan, canCreateProject } = useAuthStore()
+  const { profile, user, plan, canCreateProject, signOut } = useAuthStore()
+  const { isAdmin, checkAdminStatus } = useAdminStore()
+  const [avatarMenuOpen, setAvatarMenuOpen] = useState(false)
+  const avatarRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => { checkAdminStatus() }, [])
+
+  useEffect(() => {
+    if (!avatarMenuOpen) return
+    const handleOutside = (e: MouseEvent) => {
+      if (!avatarRef.current?.contains(e.target as Node)) setAvatarMenuOpen(false)
+    }
+    document.addEventListener('mousedown', handleOutside)
+    return () => document.removeEventListener('mousedown', handleOutside)
+  }, [avatarMenuOpen])
   const [projects, setProjects] = useState<Project[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
@@ -117,6 +133,15 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex items-center gap-3">
+            {isAdmin && (
+              <button
+                onClick={() => navigate('/admin')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-red-500/15 text-red-400 border border-red-500/20 hover:bg-red-500/25 transition-colors"
+              >
+                <ShieldAlert className="w-3.5 h-3.5" />
+                Admin
+              </button>
+            )}
             {plan !== 'team' && (
               <button
                 onClick={() => navigate('/pricing')}
@@ -126,8 +151,62 @@ export default function DashboardPage() {
                 Upgrade
               </button>
             )}
-            <div className="w-9 h-9 rounded-full bg-brand-600/30 border border-brand-600/50 flex items-center justify-center text-sm font-semibold text-brand-300 cursor-pointer">
-              {profile?.display_name?.[0]?.toUpperCase() ?? 'U'}
+            {/* Avatar dropdown */}
+            <div ref={avatarRef} className="relative">
+              <button
+                onClick={() => setAvatarMenuOpen(s => !s)}
+                className="w-9 h-9 rounded-full border-2 flex items-center justify-center text-sm font-bold text-white overflow-hidden transition-all hover:ring-2 hover:ring-indigo-500/50"
+                style={{ background: profile?.avatar_url ? 'transparent' : 'linear-gradient(135deg, #4f46e5, #7c3aed)', borderColor: 'rgba(79,70,229,0.4)' }}
+              >
+                {profile?.avatar_url
+                  ? <img src={profile.avatar_url} alt="avatar" className="w-full h-full object-cover" />
+                  : profile?.display_name?.[0]?.toUpperCase() ?? 'U'}
+              </button>
+
+              <AnimatePresence>
+                {avatarMenuOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute right-0 top-11 w-56 rounded-2xl border border-white/10 shadow-2xl overflow-hidden z-50"
+                    style={{ background: '#111827' }}
+                  >
+                    {/* User info */}
+                    <div className="px-4 py-3 border-b border-white/8">
+                      <p className="text-xs font-semibold text-white truncate">{profile?.display_name || 'User'}</p>
+                      <p className="text-[10px] text-slate-500 truncate mt-0.5">{user?.email}</p>
+                      <span className="inline-block mt-1.5 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full"
+                        style={{ background: plan === 'free' ? 'rgba(100,116,139,0.2)' : 'rgba(99,102,241,0.2)', color: plan === 'free' ? '#94a3b8' : '#a5b4fc' }}>
+                        {plan}
+                      </span>
+                    </div>
+                    {/* Menu items */}
+                    {[
+                      { icon: User,     label: 'My Profile',    action: () => { navigate('/profile'); setAvatarMenuOpen(false) } },
+                      { icon: Crown,    label: 'Subscription',  action: () => { navigate('/profile#subscription'); setAvatarMenuOpen(false) } },
+                      { icon: Settings, label: 'Settings',      action: () => { navigate('/profile'); setAvatarMenuOpen(false) } },
+                      ...(plan !== 'team' ? [{ icon: Zap, label: 'Upgrade Plan', action: () => { navigate('/pricing'); setAvatarMenuOpen(false) } }] : []),
+                    ].map(item => (
+                      <button key={item.label} onClick={item.action}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:text-white hover:bg-white/5 transition-colors text-left"
+                      >
+                        <item.icon className="w-4 h-4 text-slate-500" />
+                        {item.label}
+                      </button>
+                    ))}
+                    <div className="border-t border-white/8">
+                      <button
+                        onClick={async () => { await signOut(); navigate('/') }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-400 hover:text-red-300 hover:bg-red-500/5 transition-colors text-left"
+                      >
+                        <LogOut className="w-4 h-4" /> Sign Out
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
         </div>

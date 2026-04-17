@@ -162,45 +162,19 @@ export default function FabricCanvasComponent() {
   return (
     <div
       ref={containerRef}
-      className="canvas-bg flex-1 flex items-center justify-center overflow-auto relative"
+      className="w-full h-full flex items-center justify-center overflow-hidden"
+      style={{ background: 'transparent' }}
     >
       <div
-        className="relative"
         style={{
           transform: `scale(${zoom})`,
           transformOrigin: 'center center',
-          boxShadow: '0 25px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(97,113,246,0.15)',
-          borderRadius: '4px',
+          boxShadow: '0 20px 80px rgba(0,0,0,0.8), 0 0 0 1px rgba(99,102,241,0.2)',
+          borderRadius: '6px',
+          flexShrink: 0,
         }}
       >
         <canvas ref={canvasElementRef} />
-      </div>
-
-      {/* Zoom controls */}
-      <div className="absolute bottom-4 right-4 flex items-center gap-1">
-        <button
-          onClick={() => {
-            if (!fabricCanvas) return
-            const newZ = Math.max(parseFloat((fabricCanvas.getZoom() * 0.9).toFixed(2)), 0.1)
-            fabricCanvas.setZoom(newZ); setZoom(newZ)
-          }}
-          className="w-7 h-7 bg-surface-800/80 hover:bg-surface-700 border border-surface-700 rounded-lg text-surface-300 flex items-center justify-center text-sm transition-colors"
-        >−</button>
-        <div className="px-2 py-1 bg-surface-800/80 border border-surface-700 rounded-lg text-xs text-surface-300 min-w-[52px] text-center">
-          {Math.round(zoom * 100)}%
-        </div>
-        <button
-          onClick={() => {
-            if (!fabricCanvas) return
-            const newZ = Math.min(parseFloat((fabricCanvas.getZoom() * 1.1).toFixed(2)), 5)
-            fabricCanvas.setZoom(newZ); setZoom(newZ)
-          }}
-          className="w-7 h-7 bg-surface-800/80 hover:bg-surface-700 border border-surface-700 rounded-lg text-surface-300 flex items-center justify-center text-sm transition-colors"
-        >+</button>
-        <button
-          onClick={() => { if (!fabricCanvas) return; fabricCanvas.setZoom(1); setZoom(1) }}
-          className="px-2 py-1 bg-surface-800/80 hover:bg-surface-700 border border-surface-700 rounded-lg text-xs text-surface-400 transition-colors"
-        >Reset</button>
       </div>
     </div>
   )

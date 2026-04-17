@@ -12,6 +12,8 @@ import PricingPage from './pages/PricingPage'
 
 // Lazy loaded pages (code-split)
 const LandingPage = React.lazy(() => import('./pages/LandingPage'))
+const AdminPage   = React.lazy(() => import('./pages/admin/AdminPage'))
+const ProfilePage = React.lazy(() => import('./pages/ProfilePage'))
 
 function AuthCallback() {
   const { user, isInitialized } = useAuthStore()
@@ -95,6 +97,12 @@ export default function App() {
             } />
             <Route path="/editor/:id" element={
               <ProtectedRoute><EditorPage /></ProtectedRoute>
+            } />
+            <Route path="/admin" element={
+              <ProtectedRoute><AdminPage /></ProtectedRoute>
+            } />
+            <Route path="/profile" element={
+              <ProtectedRoute><ProfilePage /></ProtectedRoute>
             } />
 
             {/* Fallback */}

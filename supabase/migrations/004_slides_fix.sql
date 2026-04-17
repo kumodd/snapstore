@@ -1,14 +1,14 @@
--- Migration 004: Multi-Slide System
--- Run in Supabase SQL Editor
+-- Migration 004 FIX: Run this if 004_slides_table.sql gave errors
+-- This is idempotent — safe to run multiple times
 
--- ── Slides Table ──────────────────────────────────────────────────────
+-- Re-create table if it was missed
 CREATE TABLE IF NOT EXISTS public.slides (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id    UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
   position      INTEGER NOT NULL DEFAULT 0,
   title         TEXT NOT NULL DEFAULT 'Slide',
   canvas_state  JSONB NOT NULL DEFAULT '{}',
-  thumbnail_b64 TEXT,           -- base64 JPEG preview, ~15–25KB
+  thumbnail_b64 TEXT,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -16,23 +16,23 @@ CREATE TABLE IF NOT EXISTS public.slides (
 CREATE INDEX IF NOT EXISTS idx_slides_project_id ON public.slides(project_id);
 CREATE INDEX IF NOT EXISTS idx_slides_position   ON public.slides(project_id, position);
 
--- Auto-update updated_at on slides
+-- Trigger
 DROP TRIGGER IF EXISTS slides_updated_at ON public.slides;
 CREATE TRIGGER slides_updated_at
   BEFORE UPDATE ON public.slides
   FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
 
--- ── Projects: add global_style + slide_count columns ──────────────────
+-- Projects columns
 ALTER TABLE public.projects
   ADD COLUMN IF NOT EXISTS slide_count  INTEGER NOT NULL DEFAULT 1,
   ADD COLUMN IF NOT EXISTS global_style JSONB   NOT NULL DEFAULT '{}';
 
--- ── Templates: add multi-slide support ────────────────────────────────
+-- Templates columns
 ALTER TABLE public.templates
   ADD COLUMN IF NOT EXISTS slides      JSONB   NOT NULL DEFAULT '[]',
   ADD COLUMN IF NOT EXISTS slide_count INTEGER NOT NULL DEFAULT 1;
 
--- ── RLS for slides ────────────────────────────────────────────────────
+-- RLS (idempotent)
 ALTER TABLE public.slides ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "slides_owner_all" ON public.slides;
