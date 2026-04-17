@@ -5,10 +5,10 @@
     <title>SnapStore</title>
     <script>
       // Redirect 404s back to index with the path preserved
-      var path = window.location.pathname;
+      var path = window.location.pathname.replace('/snapstore', '');
       var query = window.location.search.slice(1);
       var hash = window.location.hash.slice(1);
-      var redirect = '/?p=' + encodeURIComponent(path.slice(1))
+      var redirect = '/snapstore/?p=' + encodeURIComponent(path)
         + (query ? '&q=' + encodeURIComponent(query) : '')
         + (hash ? '&h=' + encodeURIComponent(hash) : '');
       window.location.replace(redirect);
