@@ -70,7 +70,7 @@ function AppInitializer({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/snapstore">
       <AppInitializer>
         <React.Suspense fallback={
           <div className="min-h-screen bg-surface-950 flex items-center justify-center">
