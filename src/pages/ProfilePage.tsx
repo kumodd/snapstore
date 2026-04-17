@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   User, Camera, Lock, LogOut, Crown, Zap, Check,
@@ -61,9 +61,12 @@ function FieldRow({ label, value, editing, input }: { label: string; value: stri
 // ─── MAIN PAGE ────────────────────────────────────────────────────────
 export default function ProfilePage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { profile, user, plan, signOut, updateProfile, updatePassword, refreshProfile } = useAuthStore()
 
-  const [tab, setTab] = useState<'profile' | 'security' | 'subscription' | 'danger'>('profile')
+  const [tab, setTab] = useState<'profile' | 'security' | 'subscription' | 'danger'>(
+    (location.state as any)?.tab ?? 'profile'
+  )
   const [editing, setEditing] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [isUploading, setIsUploading] = useState(false)

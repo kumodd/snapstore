@@ -18,6 +18,7 @@ import PropertiesPanel from '../../components/panels/PropertiesPanel'
 import TemplatesPanel from '../../components/panels/TemplatesPanel'
 import AssetsPanel from '../../components/panels/AssetsPanel'
 import AIComposerPanel from '../../components/ai/AIComposerPanel'
+import ExportPanel from '../../components/panels/ExportPanel'
 import type { Project } from '../../lib/database.types'
 import toast from 'react-hot-toast'
 import clsx from 'clsx'
@@ -67,6 +68,7 @@ export default function EditorPage() {
     isAIOpen, setIsAIOpen,
     zoom, setZoom,
     resetEditor,
+    setIsDirty,
   } = useEditorStore()
 
   const {
@@ -79,6 +81,7 @@ export default function EditorPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isEditingName, setIsEditingName] = useState(false)
   const [activeLeftPanel, setActiveLeftPanel] = useState<LeftPanelId | null>('templates')
+  const [isExportOpen, setIsExportOpen] = useState(false)
   const slidesInitRef = useRef(false)
 
   // ── Load project metadata ─────────────────────────────────────────────
@@ -213,6 +216,7 @@ export default function EditorPage() {
     const bg = fabricCanvas.getObjects().find((o: any) => o.name === 'Background') as any
     if (bg) { bg.set({ fill: color }); fabricCanvas.renderAll() }
     else { (fabricCanvas as any).backgroundColor = color; fabricCanvas.renderAll() }
+    setIsDirty(true)
   }
 
   const saveStatusInfo = {
@@ -312,7 +316,11 @@ export default function EditorPage() {
         >
           <Wand2 className="w-3.5 h-3.5" /> AI
         </button>
-        <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-white transition-colors" style={{ background: '#4f46e5' }}>
+        <button
+          onClick={() => setIsExportOpen(!isExportOpen)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-white transition-colors"
+          style={{ background: '#4f46e5' }}
+        >
           <Download className="w-3.5 h-3.5" /> Export
         </button>
       </header>
@@ -451,6 +459,22 @@ export default function EditorPage() {
                 </motion.div>
               )}
             </AnimatePresence>
+
+            {/* Export overlay */}
+            <AnimatePresence>
+              {isExportOpen && (
+                <motion.div
+                  initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}
+                  className="absolute top-4 right-4 w-80 z-40"
+                >
+                  <ExportPanel
+                    onClose={() => setIsExportOpen(false)}
+                    projectName={projectName}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+
 
             {/* Zoom controls */}
             <div className="absolute bottom-4 right-4 flex items-center gap-1 rounded-xl px-2 py-1" style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,0.1)' }}>

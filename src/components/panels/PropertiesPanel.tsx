@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef } from 'react'
 import { useEditorStore } from '../../stores/editorStore'
 import { AlignLeft, AlignCenter, AlignRight, Bold, Italic } from 'lucide-react'
 import clsx from 'clsx'
@@ -21,12 +21,19 @@ const WEIGHTS = [
   { label: 'Extrabold', value: '800' }
 ]
 
+// Tracks which color picker is open
+type PickerOpen = 'fill' | 'stroke' | 'none'
+
 export default function PropertiesPanel() {
-  const { selectedObjects, fabricCanvas } = useEditorStore()
-  const [showColorPicker, setShowColorPicker] = useState(false)
-  const [showStrokePicker, setShowStrokePicker] = useState(false)
-  const [showFontPicker, setShowFontPicker] = useState(false)
-  const [showWeightPicker, setShowWeightPicker] = useState(false)
+  const { selectedObjects, fabricCanvas, setIsDirty } = useEditorStore()
+  const pickerOpen = useRef<PickerOpen>('none')
+  const forceUpdate = useEditorStore(s => s.setSelectedObjects)
+
+  const origFill = useRef<string>('')
+  const origStroke = useRef<string>('')
+  const origFontFamily = useRef<string>('')
+  const origFontWeight = useRef<string>('')
+
 
   if (selectedObjects.length === 0) {
     return (
@@ -40,20 +47,39 @@ export default function PropertiesPanel() {
   const type = obj.type
   const isMockupGroup = type === 'group' && obj.name?.startsWith('Mockup:')
 
+  /** Apply a property immediately and mark the project dirty */
   const update = (props: Record<string, unknown>) => {
     obj.set(props)
     obj.setCoords?.()
     fabricCanvas?.renderAll()
+    setIsDirty(true)
   }
 
-  const previewProperty = (key: string, value: any) => {
+  /** Live preview a property WITHOUT committing or marking dirty */
+  const previewProp = (key: string, value: any) => {
     obj.set(key, value)
     fabricCanvas?.renderAll()
   }
 
-  const revertProperty = (key: string, originalValue: any) => {
-    obj.set(key, originalValue)
+  /** Revert to original WITHOUT marking dirty */
+  const revertProp = (key: string, value: any) => {
+    obj.set(key, value)
     fabricCanvas?.renderAll()
+  }
+
+  // ── Scaled Width/Height handling ────────────────────────────────────
+  const scaledW = Math.round(obj.getScaledWidth?.() ?? obj.width ?? 0)
+  const scaledH = Math.round(obj.getScaledHeight?.() ?? obj.height ?? 0)
+
+  const updateSize = (dim: 'w' | 'h', value: number) => {
+    if (value <= 0) return
+    const rawW = obj.width ?? 1
+    const rawH = obj.height ?? 1
+    if (dim === 'w') {
+      update({ scaleX: value / rawW })
+    } else {
+      update({ scaleY: value / rawH })
+    }
   }
 
   const updateCornerRadius = (radius: number) => {
@@ -70,7 +96,27 @@ export default function PropertiesPanel() {
       })
       obj.set({ clipPath: clipRect, _customRx: radius })
       fabricCanvas?.renderAll()
+      setIsDirty(true)
     }
+  }
+
+  const openPicker = (p: PickerOpen) => {
+    pickerOpen.current = pickerOpen.current === p ? 'none' : p
+    forceUpdate([...selectedObjects])
+  }
+
+  const currentStroke = isMockupGroup
+    ? (obj.getObjects()[1]?.stroke ?? 'transparent')
+    : (obj.stroke ?? 'transparent')
+
+  const applyStrokeChange = (val: string, commit = false) => {
+    if (isMockupGroup) {
+      obj.getObjects()[1]?.set({ stroke: val })
+    } else {
+      obj.set({ stroke: val })
+    }
+    fabricCanvas?.renderAll()
+    if (commit) setIsDirty(true)
   }
 
   return (
@@ -82,8 +128,6 @@ export default function PropertiesPanel() {
           {[
             { label: 'X', key: 'left', value: Math.round(obj.left ?? 0) },
             { label: 'Y', key: 'top', value: Math.round(obj.top ?? 0) },
-            { label: 'W', key: 'width', value: Math.round(obj.width ?? 0) },
-            { label: 'H', key: 'height', value: Math.round(obj.height ?? 0) },
           ].map(field => (
             <div key={field.key}>
               <label className="label">{field.label}</label>
@@ -95,6 +139,24 @@ export default function PropertiesPanel() {
               />
             </div>
           ))}
+          <div>
+            <label className="label">W</label>
+            <input
+              type="number"
+              value={scaledW}
+              onChange={e => updateSize('w', parseFloat(e.target.value))}
+              className="input-sm text-right"
+            />
+          </div>
+          <div>
+            <label className="label">H</label>
+            <input
+              type="number"
+              value={scaledH}
+              onChange={e => updateSize('h', parseFloat(e.target.value))}
+              className="input-sm text-right"
+            />
+          </div>
         </div>
         <div className="mt-2">
           <label className="label">Rotation</label>
@@ -125,17 +187,20 @@ export default function PropertiesPanel() {
             <div
               className="w-8 h-8 rounded-lg border-2 border-surface-600 cursor-pointer flex-shrink-0"
               style={{ backgroundColor: obj.fill as string ?? '#6171f6' }}
-              onClick={() => { setShowColorPicker(!showColorPicker); setShowStrokePicker(false) }}
+              onClick={() => openPicker('fill')}
             />
-            {showColorPicker && (
+            {pickerOpen.current === 'fill' && (
               <div className="absolute top-10 left-0 z-50 p-2.5 bg-surface-800 border border-surface-700 rounded-xl shadow-xl w-[156px]">
                 <div className="grid grid-cols-5 gap-1.5 mb-2">
                   {PREDEFINED_COLORS.map(c => (
                     <button
                       key={c}
-                      onMouseEnter={() => previewProperty('fill', c)}
-                      onMouseLeave={() => revertProperty('fill', obj.fill ?? '#6171f6')}
-                      onClick={() => { update({ fill: c }); setShowColorPicker(false) }}
+                      onMouseEnter={() => {
+                        origFill.current = obj.fill ?? '#6171f6'
+                        previewProp('fill', c)
+                      }}
+                      onMouseLeave={() => revertProp('fill', origFill.current)}
+                      onClick={() => { update({ fill: c }); openPicker('none') }}
                       className={clsx(
                         'w-5 h-5 rounded-md hover:scale-125 transition-transform border border-surface-600/50 ring-0 hover:ring-2 hover:ring-white/50',
                         c === 'transparent' && 'bg-gradient-to-br from-gray-300 to-white'
@@ -150,8 +215,8 @@ export default function PropertiesPanel() {
                   <input
                     type="color"
                     defaultValue={typeof obj.fill === 'string' && obj.fill !== 'transparent' ? obj.fill : '#6171f6'}
-                    onInput={e => previewProperty('fill', (e.target as HTMLInputElement).value)}
-                    onChange={e => { update({ fill: e.target.value }); setShowColorPicker(false) }}
+                    onInput={e => previewProp('fill', (e.target as HTMLInputElement).value)}
+                    onChange={e => { update({ fill: e.target.value }); openPicker('none') }}
                     className="w-full h-6 rounded cursor-pointer bg-transparent"
                   />
                 </div>
@@ -176,18 +241,34 @@ export default function PropertiesPanel() {
             <label className="label">Font Family</label>
             <button
               className="input-sm w-full text-left flex items-center justify-between"
-              onClick={() => { setShowFontPicker(!showFontPicker); setShowWeightPicker(false) }}
+              onClick={() => openPicker(pickerOpen.current === 'fill' ? 'fill' : 'none')}
+              onClickCapture={() => {
+                // Toggle a custom font picker state using rerender trick
+                const next = pickerOpen.current === ('font' as any) ? 'none' : 'font'
+                pickerOpen.current = next as any
+                forceUpdate([...selectedObjects])
+              }}
             >
               <span style={{ fontFamily: obj.fontFamily ?? 'Inter' }}>{obj.fontFamily ?? 'Inter'}</span>
             </button>
-            {showFontPicker && (
+            {(pickerOpen.current as any) === 'font' && (
               <div className="absolute top-14 left-0 w-full z-50 bg-surface-800 border border-surface-700 rounded-xl shadow-xl max-h-60 overflow-y-auto no-scrollbar py-1">
                 {FONTS.map(f => (
                   <button
                     key={f}
-                    onMouseEnter={() => previewProperty('fontFamily', f)}
-                    onMouseLeave={() => revertProperty('fontFamily', obj.fontFamily ?? 'Inter')}
-                    onClick={() => { update({ fontFamily: f }); setShowFontPicker(false) }}
+                    onMouseEnter={() => {
+                      if (origFontFamily.current === '') origFontFamily.current = obj.fontFamily ?? 'Inter'
+                      previewProp('fontFamily', f)
+                    }}
+                    onMouseLeave={() => {
+                      revertProp('fontFamily', origFontFamily.current)
+                    }}
+                    onClick={() => {
+                      update({ fontFamily: f })
+                      origFontFamily.current = f
+                      pickerOpen.current = 'none'
+                      forceUpdate([...selectedObjects])
+                    }}
                     className={clsx(
                       'w-full text-left px-3 py-1.5 text-sm hover:bg-surface-700 transition-colors',
                       obj.fontFamily === f ? 'text-brand-400 font-semibold' : 'text-surface-200'
@@ -214,18 +295,29 @@ export default function PropertiesPanel() {
               <label className="label">Weight</label>
               <button
                 className="input-sm w-full text-left"
-                onClick={() => { setShowWeightPicker(!showWeightPicker); setShowFontPicker(false) }}
+                onClick={() => {
+                  pickerOpen.current = pickerOpen.current === ('weight' as any) ? 'none' : 'weight' as any
+                  forceUpdate([...selectedObjects])
+                }}
               >
                 {WEIGHTS.find(w => w.value === (obj.fontWeight ?? 'normal'))?.label ?? 'Regular'}
               </button>
-              {showWeightPicker && (
+              {(pickerOpen.current as any) === 'weight' && (
                 <div className="absolute top-14 left-0 w-full z-50 bg-surface-800 border border-surface-700 rounded-xl shadow-xl py-1">
                   {WEIGHTS.map(w => (
                     <button
                       key={w.value}
-                      onMouseEnter={() => previewProperty('fontWeight', w.value)}
-                      onMouseLeave={() => revertProperty('fontWeight', obj.fontWeight ?? 'normal')}
-                      onClick={() => { update({ fontWeight: w.value }); setShowWeightPicker(false) }}
+                      onMouseEnter={() => {
+                        if (origFontWeight.current === '') origFontWeight.current = obj.fontWeight ?? 'normal'
+                        previewProp('fontWeight', w.value)
+                      }}
+                      onMouseLeave={() => revertProp('fontWeight', origFontWeight.current)}
+                      onClick={() => {
+                        update({ fontWeight: w.value })
+                        origFontWeight.current = w.value
+                        pickerOpen.current = 'none'
+                        forceUpdate([...selectedObjects])
+                      }}
                       className={clsx(
                         'w-full text-left px-3 py-1.5 text-sm hover:bg-surface-700 transition-colors',
                         obj.fontWeight === w.value ? 'text-brand-400 font-semibold' : 'text-surface-200'
@@ -303,63 +395,45 @@ export default function PropertiesPanel() {
               <div className="flex items-center gap-2">
                 <div
                   className="w-8 h-8 rounded-lg border-2 border-surface-600 cursor-pointer flex-shrink-0"
-                  style={{ backgroundColor: (isMockupGroup ? obj.getObjects()[1].stroke : obj.stroke) as string ?? 'transparent' }}
-                  onClick={() => { setShowStrokePicker(!showStrokePicker); setShowColorPicker(false) }}
+                  style={{ backgroundColor: currentStroke }}
+                  onClick={() => openPicker('stroke')}
                 />
                 <input
                   type="text"
-                  value={(isMockupGroup ? obj.getObjects()[1].stroke : obj.stroke) as string ?? ''}
-                  onChange={e => {
-                    if (isMockupGroup) {
-                      obj.getObjects()[1].set({ stroke: e.target.value })
-                      fabricCanvas?.renderAll()
-                    } else {
-                      update({ stroke: e.target.value })
-                    }
-                  }}
+                  value={currentStroke}
+                  onChange={e => applyStrokeChange(e.target.value, true)}
                   className="input-sm font-mono flex-1"
                   placeholder="none"
                 />
               </div>
-              {showStrokePicker && (
+              {pickerOpen.current === 'stroke' && (
                 <div className="absolute top-14 left-0 z-50 p-2.5 bg-surface-800 border border-surface-700 rounded-xl shadow-xl w-[156px]">
                   <div className="grid grid-cols-5 gap-1.5 mb-2">
-                    {PREDEFINED_COLORS.map(c => {
-                      const currentStroke = isMockupGroup ? obj.getObjects()[1].stroke : obj.stroke
-                      const applyStroke = (val: string) => {
-                        if (isMockupGroup) { obj.getObjects()[1].set({ stroke: val }); fabricCanvas?.renderAll() }
-                        else update({ stroke: val })
-                      }
-                      return (
-                        <button
-                          key={c}
-                          onMouseEnter={() => applyStroke(c)}
-                          onMouseLeave={() => applyStroke(currentStroke ?? 'transparent')}
-                          onClick={() => { applyStroke(c); setShowStrokePicker(false) }}
-                          className={clsx(
-                            'w-5 h-5 rounded-md hover:scale-125 transition-transform border border-surface-600/50 hover:ring-2 hover:ring-white/50',
-                            c === 'transparent' && 'bg-gradient-to-br from-gray-300 to-white'
-                          )}
-                          style={{ backgroundColor: c !== 'transparent' ? c : undefined }}
-                          title={c}
-                        />
-                      )
-                    })}
+                    {PREDEFINED_COLORS.map(c => (
+                      <button
+                        key={c}
+                        onMouseEnter={() => {
+                          origStroke.current = currentStroke
+                          applyStrokeChange(c)
+                        }}
+                        onMouseLeave={() => applyStrokeChange(origStroke.current)}
+                        onClick={() => { applyStrokeChange(c, true); openPicker('none') }}
+                        className={clsx(
+                          'w-5 h-5 rounded-md hover:scale-125 transition-transform border border-surface-600/50 hover:ring-2 hover:ring-white/50',
+                          c === 'transparent' && 'bg-gradient-to-br from-gray-300 to-white'
+                        )}
+                        style={{ backgroundColor: c !== 'transparent' ? c : undefined }}
+                        title={c}
+                      />
+                    ))}
                   </div>
                   <div className="flex items-center gap-1.5 pt-1.5 border-t border-surface-700">
                     <label className="text-[9px] text-surface-500 uppercase tracking-wider flex-shrink-0">Custom</label>
                     <input
                       type="color"
-                      defaultValue={(() => {
-                        const s = isMockupGroup ? obj.getObjects()[1].stroke : obj.stroke
-                        return s && s !== 'transparent' ? s : '#334155'
-                      })()}
-                      onInput={e => {
-                        const val = (e.target as HTMLInputElement).value
-                        if (isMockupGroup) { obj.getObjects()[1].set({ stroke: val }); fabricCanvas?.renderAll() }
-                        else update({ stroke: val })
-                      }}
-                      onChange={() => { setShowStrokePicker(false) }}
+                      defaultValue={currentStroke && currentStroke !== 'transparent' ? currentStroke : '#334155'}
+                      onInput={e => applyStrokeChange((e.target as HTMLInputElement).value)}
+                      onChange={e => { applyStrokeChange(e.target.value, true); openPicker('none') }}
                       className="w-full h-6 rounded cursor-pointer bg-transparent"
                     />
                   </div>
@@ -370,14 +444,15 @@ export default function PropertiesPanel() {
               <label className="label">Width</label>
               <input
                 type="number"
-                value={(isMockupGroup ? obj.getObjects()[1].strokeWidth : obj.strokeWidth) as number ?? 0}
+                value={(isMockupGroup ? obj.getObjects()[1]?.strokeWidth : obj.strokeWidth) as number ?? 0}
                 onChange={e => {
                   if (isMockupGroup) {
-                    obj.getObjects()[1].set({ strokeWidth: parseInt(e.target.value) || 0 })
+                    obj.getObjects()[1]?.set({ strokeWidth: parseInt(e.target.value) || 0 })
                     fabricCanvas?.renderAll()
                   } else {
                     update({ strokeWidth: parseInt(e.target.value) || 0 })
                   }
+                  setIsDirty(true)
                 }}
                 className="input-sm"
               />
@@ -397,7 +472,7 @@ export default function PropertiesPanel() {
         </div>
       )}
 
-      {/* Image Corner Radius (Custom via clipPath) */}
+      {/* Image Corner Radius */}
       {type === 'image' && (
         <div className="panel-section space-y-2">
           <p className="panel-section-title">Image Styling</p>

@@ -1,221 +1,284 @@
 import { useState } from 'react'
-import { Download, Loader2, CheckCircle } from 'lucide-react'
+import { X, Download, Image as ImageIcon, FileImage, Archive, Loader2, CheckCircle2 } from 'lucide-react'
 import { useEditorStore } from '../../stores/editorStore'
-import { useAuthStore } from '../../stores/authStore'
-import { supabase } from '../../lib/supabase'
-import { DEVICES, DEVICE_MAP } from '../../data/devices'
-import toast from 'react-hot-toast'
+import { useSlideStore } from '../../stores/slideStore'
 import clsx from 'clsx'
 
 interface ExportPanelProps {
-  projectId: string
+  onClose: () => void
+  projectName: string
 }
 
-type Format = 'png' | 'jpg' | 'webp'
+type Format = 'PNG' | 'JPEG' | 'SVG'
+type Scale = 1 | 2 | 3
+type ExportScope = 'current' | 'all'
 
-export default function ExportPanel({ projectId }: ExportPanelProps) {
-  const { fabricCanvas, selectedDevice, setSelectedDevice, isExporting, setIsExporting } = useEditorStore()
-  const { profile, plan, canExport } = useAuthStore()
+const FORMAT_OPTIONS: { id: Format; label: string; icon: typeof ImageIcon; desc: string }[] = [
+  { id: 'PNG',  label: 'PNG',  icon: ImageIcon,  desc: 'Lossless · supports transparency' },
+  { id: 'JPEG', label: 'JPEG', icon: FileImage,  desc: 'Smaller file · great for photos' },
+  { id: 'SVG',  label: 'SVG',  icon: Archive,    desc: 'Vector · infinite resolution' },
+]
 
-  const [format, setFormat] = useState<Format>('png')
-  const [quality, setQuality] = useState(1.0)
-  const [selectedDeviceIds, setSelectedDeviceIds] = useState<string[]>([selectedDevice.id])
-  const [exportedUrl, setExportedUrl] = useState<string | null>(null)
+const SCALE_OPTIONS: Scale[] = [1, 2, 3]
 
-  const toggleDevice = (id: string) => {
-    setSelectedDeviceIds(prev =>
-      prev.includes(id) ? prev.filter(d => d !== id) : [...prev, id]
-    )
+export default function ExportPanel({ onClose, projectName }: ExportPanelProps) {
+  const { fabricCanvas } = useEditorStore()
+  const { slides, activeSlideId } = useSlideStore()
+
+  const [format, setFormat] = useState<Format>('PNG')
+  const [scale, setScale] = useState<Scale>(2)
+  const [quality, setQuality] = useState(0.92)
+  const [scope, setScope] = useState<ExportScope>('current')
+  const [isExporting, setIsExporting] = useState(false)
+  const [done, setDone] = useState(false)
+
+  const safeFileName = (name: string) => name.replace(/[^a-zA-Z0-9-_]/g, '_')
+
+  const downloadDataURL = (dataURL: string, filename: string) => {
+    const a = document.createElement('a')
+    a.href = dataURL
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
   }
 
-  const handleExport = async () => {
+  const exportCurrentSlide = async () => {
     if (!fabricCanvas) return
 
-    if (!canExport()) {
-      toast.error(`Free plan: ${profile?.export_count_this_month ?? 0}/10 exports used this month. Upgrade to Indie for unlimited.`)
+    if (format === 'SVG') {
+      const svg = fabricCanvas.toSVG()
+      const blob = new Blob([svg], { type: 'image/svg+xml' })
+      const url = URL.createObjectURL(blob)
+      downloadDataURL(url, `${safeFileName(projectName)}_slide.svg`)
+      URL.revokeObjectURL(url)
       return
     }
 
-    setIsExporting(true)
-    setExportedUrl(null)
+    const dataURL = fabricCanvas.toDataURL({
+      format: format === 'PNG' ? 'png' : 'jpeg',
+      quality: format === 'JPEG' ? quality : 1,
+      multiplier: scale,
+    })
+    const ext = format.toLowerCase()
+    const slideLabel = slides.find(s => s.id === activeSlideId)?.title ?? 'slide'
+    downloadDataURL(dataURL, `${safeFileName(projectName)}_${safeFileName(slideLabel)}.${ext}`)
+  }
 
+  const exportAllSlides = async () => {
+    if (!fabricCanvas) return
+
+    let JSZip: any
     try {
-      // Deselect all objects for clean export
-      fabricCanvas.discardActiveObject()
-      fabricCanvas.renderAll()
-
-      const originalDevice = selectedDevice
-      const generatedUrls: string[] = []
-
-      for (const deviceId of selectedDeviceIds) {
-        const targetDevice = DEVICE_MAP[deviceId]
-        if (!targetDevice) continue
-        
-        // 1. Resize canvas logically
-        setSelectedDevice(targetDevice)
-        
-        // 2. Yield to let React and Fabric update dimensions/render
-        await new Promise(resolve => setTimeout(resolve, 150))
-
-        // 3. Export scaled snapshot
-        const multiplier = targetDevice.scaleFactor
-        const dataURL = fabricCanvas.toDataURL({
-          format: format === 'jpg' ? 'jpeg' : format,
-          quality,
-          multiplier,
-        })
-
-        // 4. Upload to Storage
-        const blob = await dataURLToBlob(dataURL)
-        const fileName = `${profile?.id}/${projectId}/${Date.now()}-${targetDevice.id}.${format}`
-
-        const { error: uploadError } = await supabase.storage
-          .from('exports')
-          .upload(fileName, blob, { contentType: `image/${format === 'jpg' ? 'jpeg' : format}`, upsert: true })
-
-        if (uploadError) throw uploadError
-
-        const { data: signedData } = await supabase.storage
-          .from('exports')
-          .createSignedUrl(fileName, 3600)
-
-        if (signedData?.signedUrl) {
-           generatedUrls.push(signedData.signedUrl)
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      JSZip = (await import(/* @vite-ignore */ 'jszip')).default
+    } catch {
+      // Fallback: download individually if JSZip unavailable
+      for (const slide of slides) {
+        if (slide.canvas_state && Object.keys(slide.canvas_state).length > 0) {
+          await fabricCanvas.loadFromJSON(slide.canvas_state as any)
+          fabricCanvas.renderAll()
         }
-
-        // 5. Trigger physical download
-        const link = document.createElement('a')
-        link.href = dataURL
-        link.download = `snapstore-${projectId}-${targetDevice.id}.${format}`
-        link.click()
+        const dataURL = fabricCanvas.toDataURL({
+          format: format === 'PNG' ? 'png' : 'jpeg',
+          quality: format === 'JPEG' ? quality : 1,
+          multiplier: scale,
+        })
+        const num = String(slide.position + 1).padStart(2, '0')
+        downloadDataURL(dataURL, `${safeFileName(projectName)}_${num}_${safeFileName(slide.title)}.${format.toLowerCase()}`)
       }
+      return
+    }
 
-      // Log export job
-      await (supabase as any).from('export_jobs').insert({
-        project_id: projectId,
-        user_id: profile!.id,
-        status: 'done',
-        export_url: generatedUrls[0],
-        format,
-        devices: selectedDeviceIds,
-      })
+    const zip = new JSZip()
+    const folder = zip.folder(safeFileName(projectName))
 
-      // Increment export count
-      if (plan === 'free') {
-        await (supabase as any).from('profiles').update({
-          export_count_this_month: (profile?.export_count_this_month ?? 0) + 1,
-        }).eq('id', profile!.id)
+    for (const slide of slides) {
+      if (slide.canvas_state && Object.keys(slide.canvas_state).length > 0) {
+        await fabricCanvas.loadFromJSON(slide.canvas_state as any)
+        fabricCanvas.renderAll()
       }
+      const num = String(slide.position + 1).padStart(2, '0')
+      const base = `${num}_${safeFileName(slide.title)}`
 
-      setExportedUrl(generatedUrls[0] ?? null)
-      toast.success(`Exported ${selectedDeviceIds.length} screenshots!`)
+      if (format === 'SVG') {
+        folder?.file(`${base}.svg`, fabricCanvas.toSVG())
+      } else {
+        const dataURL = fabricCanvas.toDataURL({
+          format: format === 'PNG' ? 'png' : 'jpeg',
+          quality: format === 'JPEG' ? quality : 1,
+          multiplier: scale,
+        })
+        folder?.file(`${base}.${format.toLowerCase()}`, dataURL.split(',')[1], { base64: true })
+      }
+    }
 
-      // Restore original device
-      setSelectedDevice(originalDevice)
+    const blob = await zip.generateAsync({ type: 'blob' })
+    const url = URL.createObjectURL(blob)
+    downloadDataURL(url, `${safeFileName(projectName)}_all_slides.zip`)
+    URL.revokeObjectURL(url)
+  }
 
-    } catch (err: any) {
+  const handleExport = async () => {
+    setIsExporting(true)
+    setDone(false)
+    try {
+      if (scope === 'current' || slides.length <= 1) {
+        await exportCurrentSlide()
+      } else {
+        await exportAllSlides()
+      }
+      setDone(true)
+      setTimeout(() => setDone(false), 2500)
+    } catch (err) {
       console.error('Export failed:', err)
-      toast.error(`Export failed: ${err.message}`)
     } finally {
       setIsExporting(false)
     }
   }
 
+  const canvasW = fabricCanvas?.getWidth() ?? 390
+  const canvasH = fabricCanvas?.getHeight() ?? 844
+
   return (
-    <div className="space-y-0">
-      {/* Format */}
-      <div className="panel-section">
-        <p className="panel-section-title">Format</p>
-        <div className="flex p-0.5 bg-surface-800 rounded-xl">
-          {(['png', 'jpg', 'webp'] as Format[]).map(f => (
-            <button
-              key={f}
-              onClick={() => setFormat(f)}
-              className={clsx(
-                'flex-1 py-1.5 rounded-lg text-xs font-medium uppercase transition-colors',
-                format === f ? 'bg-surface-600 text-white' : 'text-surface-500 hover:text-surface-300'
-              )}
-            >
-              {f}
-            </button>
-          ))}
+    <div
+      className="rounded-2xl overflow-hidden shadow-2xl border border-white/10"
+      style={{ background: '#111827', fontFamily: 'Inter, sans-serif' }}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+        <div className="flex items-center gap-2">
+          <Download className="w-4 h-4 text-indigo-400" />
+          <span className="text-sm font-semibold text-white">Export</span>
         </div>
-      </div>
-
-      {/* Quality (for jpg/webp) */}
-      {format !== 'png' && (
-        <div className="panel-section">
-          <label className="label">Quality ({Math.round(quality * 100)}%)</label>
-          <input
-            type="range" min={0.1} max={1} step={0.05}
-            value={quality}
-            onChange={e => setQuality(parseFloat(e.target.value))}
-            className="w-full accent-brand-500"
-          />
-        </div>
-      )}
-
-      {/* Device selection */}
-      <div className="panel-section">
-        <p className="panel-section-title">Export for Devices</p>
-        <div className="space-y-1">
-          {DEVICES.slice(0, 5).map(device => (
-            <label key={device.id} className="flex items-center gap-2.5 cursor-pointer py-0.5">
-              <input
-                type="checkbox"
-                checked={selectedDeviceIds.includes(device.id)}
-                onChange={() => toggleDevice(device.id)}
-                className="accent-brand-500 w-3 h-3"
-              />
-              <span className="text-xs text-surface-300">{device.name}</span>
-            </label>
-          ))}
-        </div>
-      </div>
-
-      {/* Export button */}
-      <div className="panel-section">
-        {plan === 'free' && (
-          <p className="text-[10px] text-surface-500 mb-2">
-            {profile?.export_count_this_month ?? 0}/10 exports used this month
-          </p>
-        )}
         <button
-          id="btn-export"
+          onClick={onClose}
+          className="p-1 rounded-lg text-slate-500 hover:text-white hover:bg-white/10 transition-colors"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className="p-4 space-y-4">
+        {/* Format */}
+        <div>
+          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Format</p>
+          <div className="grid grid-cols-3 gap-1.5">
+            {FORMAT_OPTIONS.map(f => (
+              <button
+                key={f.id}
+                onClick={() => setFormat(f.id)}
+                className={clsx(
+                  'flex flex-col items-center gap-1.5 py-2.5 rounded-xl border transition-all text-center',
+                  format === f.id
+                    ? 'border-indigo-500 bg-indigo-500/10 text-indigo-300'
+                    : 'border-white/10 text-slate-400 hover:border-white/20 hover:text-slate-200'
+                )}
+              >
+                <f.icon className="w-4 h-4" />
+                <span className="text-[11px] font-semibold">{f.label}</span>
+              </button>
+            ))}
+          </div>
+          <p className="text-[10px] text-slate-500 mt-1.5">
+            {FORMAT_OPTIONS.find(f => f.id === format)?.desc}
+          </p>
+        </div>
+
+        {/* Scale */}
+        {format !== 'SVG' && (
+          <div>
+            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Resolution</p>
+            <div className="grid grid-cols-3 gap-1.5">
+              {SCALE_OPTIONS.map(s => (
+                <button
+                  key={s}
+                  onClick={() => setScale(s)}
+                  className={clsx(
+                    'py-2 rounded-xl border text-xs font-semibold transition-all',
+                    scale === s
+                      ? 'border-indigo-500 bg-indigo-500/10 text-indigo-300'
+                      : 'border-white/10 text-slate-400 hover:border-white/20 hover:text-slate-200'
+                  )}
+                >
+                  {s}×
+                  <span className="block text-[9px] font-normal text-slate-600 mt-0.5">
+                    {canvasW * s}×{canvasH * s}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* JPEG Quality */}
+        {format === 'JPEG' && (
+          <div>
+            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+              Quality ({Math.round(quality * 100)}%)
+            </p>
+            <input
+              type="range"
+              min={0.1} max={1} step={0.01}
+              value={quality}
+              onChange={e => setQuality(parseFloat(e.target.value))}
+              className="w-full accent-indigo-500"
+            />
+          </div>
+        )}
+
+        {/* Scope */}
+        {slides.length > 1 && (
+          <div>
+            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Slides</p>
+            <div className="grid grid-cols-2 gap-1.5">
+              {([
+                { id: 'current' as const, label: 'Current slide' },
+                { id: 'all' as const, label: `All ${slides.length} (ZIP)` },
+              ]).map(opt => (
+                <button
+                  key={opt.id}
+                  onClick={() => setScope(opt.id)}
+                  className={clsx(
+                    'py-2 px-3 rounded-xl border text-xs font-medium transition-all text-left',
+                    scope === opt.id
+                      ? 'border-indigo-500 bg-indigo-500/10 text-indigo-300'
+                      : 'border-white/10 text-slate-400 hover:border-white/20'
+                  )}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Export button */}
+        <button
           onClick={handleExport}
           disabled={isExporting}
-          className="btn-primary btn-md w-full"
+          className={clsx(
+            'w-full py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all',
+            done
+              ? 'bg-emerald-600 text-white'
+              : 'bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50'
+          )}
         >
           {isExporting ? (
             <><Loader2 className="w-4 h-4 animate-spin" /> Exporting…</>
+          ) : done ? (
+            <><CheckCircle2 className="w-4 h-4" /> Done!</>
           ) : (
-            <><Download className="w-4 h-4" /> Export Screenshot</>
+            <><Download className="w-4 h-4" /> Export {scope === 'all' && slides.length > 1 ? 'ZIP' : format}</>
           )}
         </button>
 
-        {exportedUrl && (
-          <a
-            href={exportedUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="mt-2 btn-secondary btn-sm w-full"
-          >
-            <CheckCircle className="w-3.5 h-3.5 text-accent-green" />
-            View exported file
-          </a>
-        )}
+        <p className="text-[10px] text-slate-600 text-center leading-relaxed">
+          {scope === 'all' && slides.length > 1
+            ? 'All slides packed into a ZIP archive'
+            : `Current slide · ${format} · ${scale}× (${canvasW * scale}×${canvasH * scale}px)`}
+        </p>
       </div>
     </div>
   )
-}
-
-function dataURLToBlob(dataURL: string): Promise<Blob> {
-  return new Promise(resolve => {
-    const parts = dataURL.split(',')
-    const mime = parts[0].match(/:(.*?);/)?.[1] ?? 'image/png'
-    const binary = atob(parts[1])
-    const array = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i++) array[i] = binary.charCodeAt(i)
-    resolve(new Blob([array], { type: mime }))
-  })
 }

@@ -185,8 +185,8 @@ export default function DashboardPage() {
                     {/* Menu items */}
                     {[
                       { icon: User,     label: 'My Profile',    action: () => { navigate('/profile'); setAvatarMenuOpen(false) } },
-                      { icon: Crown,    label: 'Subscription',  action: () => { navigate('/profile#subscription'); setAvatarMenuOpen(false) } },
-                      { icon: Settings, label: 'Settings',      action: () => { navigate('/profile'); setAvatarMenuOpen(false) } },
+                      { icon: Crown,    label: 'Subscription',  action: () => { navigate('/profile', { state: { tab: 'subscription' } }); setAvatarMenuOpen(false) } },
+                      { icon: Settings, label: 'Settings',      action: () => { navigate('/profile', { state: { tab: 'security' } }); setAvatarMenuOpen(false) } },
                       ...(plan !== 'team' ? [{ icon: Zap, label: 'Upgrade Plan', action: () => { navigate('/pricing'); setAvatarMenuOpen(false) } }] : []),
                     ].map(item => (
                       <button key={item.label} onClick={item.action}

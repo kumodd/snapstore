@@ -11,6 +11,7 @@ export default function FabricCanvasComponent() {
     fabricCanvas,
     setSelectedObjects,
     pushHistory,
+    setIsDirty,
     undo,
     redo,
     activeTool,
@@ -48,7 +49,10 @@ export default function FabricCanvasComponent() {
     canvas.on('selection:updated', () => setSelectedObjects(canvas.getActiveObjects()))
     canvas.on('selection:cleared', () => setSelectedObjects([]))
 
-    const handleModified = () => captureSnapshot(canvas)
+    const handleModified = () => {
+      captureSnapshot(canvas)
+      setIsDirty(true)
+    }
     canvas.on('object:modified', handleModified)
     canvas.on('object:added', handleModified)
     canvas.on('object:removed', handleModified)

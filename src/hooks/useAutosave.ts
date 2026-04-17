@@ -97,23 +97,21 @@ export function useAutosave() {
 
   // Flush local IndexedDB draft to server (called on reconnect)
   const flushLocalDraft = useCallback(async () => {
-    if (!projectId || !user) return
+    if (!projectId || !user || !fabricCanvas || !activeSlideId) return
     try {
       const draft = await idbGet(`${LOCAL_DRAFT_PREFIX}${projectId}`)
       if (!draft) return
-      const { error } = await (supabase as any).from('projects').update({
-        canvas_state: draft.canvasState,
-        updated_at: new Date().toISOString(),
-      }).eq('id', projectId)
-      if (!error) {
-        setSaveStatus('saved')
-        setLastSavedAt(new Date())
-        setIsDirty(false)
-      }
+      // Reload canvas from local draft, then save the active slide
+      await fabricCanvas.loadFromJSON(draft.canvasState)
+      fabricCanvas.renderAll()
+      await saveActiveSlide(fabricCanvas)
+      setSaveStatus('saved')
+      setLastSavedAt(new Date())
+      setIsDirty(false)
     } catch (err) {
       console.warn('Flush draft failed:', err)
     }
-  }, [projectId, user, setSaveStatus, setLastSavedAt, setIsDirty])
+  }, [projectId, user, fabricCanvas, activeSlideId, saveActiveSlide, setSaveStatus, setLastSavedAt, setIsDirty])
 
   // Load draft from IndexedDB on project open (before server response)
   const loadLocalDraft = useCallback(async (projId: string) => {
@@ -135,8 +133,8 @@ export function useAutosave() {
     return () => {
       if (localTimerRef.current) clearInterval(localTimerRef.current)
       if (serverTimerRef.current) clearInterval(serverTimerRef.current)
-      // Final save on unmount
-      saveToServer()
+      // Final save on unmount — only if there are unsaved changes
+      if (useEditorStore.getState().isDirty) saveToServer()
     }
   }, [projectId, saveLocalDraft, saveToServer])
 
