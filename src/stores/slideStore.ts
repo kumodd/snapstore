@@ -58,7 +58,7 @@ const captureThumb = (canvas: FabricCanvas): string => {
   }
 }
 
-const serializeCanvas = (canvas: FabricCanvas): object => canvas.toJSON([
+const serializeCanvas = (canvas: FabricCanvas): object => (canvas as any).toJSON([
   'name', 'selectable', 'evented', 'lockMovementX', 'lockMovementY',
   'lockScalingX', 'lockScalingY', 'lockRotation', 'hasControls', '_customRx'
 ])
@@ -75,7 +75,7 @@ export const useSlideStore = create<SlideState>((set, get) => ({
   // ── Load all slides for a project ────────────────────────────────────
   loadSlides: async (projectId) => {
     set({ isLoadingSlides: true })
-    const { data, error } = await supabase
+    const { data, error } = await (supabase as any)
       .from('slides')
       .select('*')
       .eq('project_id', projectId)
@@ -105,7 +105,7 @@ export const useSlideStore = create<SlideState>((set, get) => ({
     if (activeSlideId) {
       const json = serializeCanvas(fabricCanvas)
       const thumb = captureThumb(fabricCanvas)
-      await supabase.from('slides').update({
+      await (supabase as any).from('slides').update({
         canvas_state: json,
         thumbnail_b64: thumb,
       }).eq('id', activeSlideId)
@@ -138,7 +138,7 @@ export const useSlideStore = create<SlideState>((set, get) => ({
     if (activeSlideId) await saveActiveSlide(fabricCanvas)
 
     const newPosition = slides.length
-    const { data, error } = await supabase
+    const { data, error } = await (supabase as any)
       .from('slides')
       .insert({
         project_id: projectId,
@@ -165,7 +165,7 @@ export const useSlideStore = create<SlideState>((set, get) => ({
     fabricCanvas.renderAll()
 
     // Sync slide_count on project
-    await supabase
+    await (supabase as any)
       .from('projects')
       .update({ slide_count: newPosition + 1 })
       .eq('id', projectId)
@@ -176,7 +176,7 @@ export const useSlideStore = create<SlideState>((set, get) => ({
     const { slides } = get()
     const newPosition = slides.length
 
-    const { data, error } = await supabase
+    const { data, error } = await (supabase as any)
       .from('slides')
       .insert({
         project_id: projectId,
@@ -193,11 +193,11 @@ export const useSlideStore = create<SlideState>((set, get) => ({
   },
 
   // ── Delete a slide ────────────────────────────────────────────────────
-  deleteSlide: async (slideId, projectId, fabricCanvas) => {
+  deleteSlide: async (slideId, _projectId, fabricCanvas) => {
     const { slides, activeSlideId } = get()
     if (slides.length <= 1) return // Always keep at least 1
 
-    const { error } = await supabase.from('slides').delete().eq('id', slideId)
+    const { error } = await (supabase as any).from('slides').delete().eq('id', slideId)
     if (error) return
 
     const remaining = slides.filter(s => s.id !== slideId)
@@ -206,7 +206,7 @@ export const useSlideStore = create<SlideState>((set, get) => ({
 
     // Batch update positions
     await Promise.all(reordered.map(s =>
-      supabase.from('slides').update({ position: s.position }).eq('id', s.id)
+      (supabase as any).from('slides').update({ position: s.position }).eq('id', s.id)
     ))
 
     let nextActiveId = activeSlideId
@@ -225,7 +225,7 @@ export const useSlideStore = create<SlideState>((set, get) => ({
   },
 
   // ── Reorder slides ────────────────────────────────────────────────────
-  reorderSlides: async (projectId, from, to) => {
+  reorderSlides: async (_projectId, from, to) => {
     const { slides } = get()
     const reordered = [...slides]
     const [moved] = reordered.splice(from, 1)
@@ -236,7 +236,7 @@ export const useSlideStore = create<SlideState>((set, get) => ({
 
     // Batch persist
     await Promise.all(normalized.map(s =>
-      supabase.from('slides').update({ position: s.position }).eq('id', s.id)
+      (supabase as any).from('slides').update({ position: s.position }).eq('id', s.id)
     ))
   },
 
@@ -248,7 +248,7 @@ export const useSlideStore = create<SlideState>((set, get) => ({
     const json = serializeCanvas(fabricCanvas)
     const thumb = captureThumb(fabricCanvas)
 
-    await supabase.from('slides').update({
+    await (supabase as any).from('slides').update({
       canvas_state: json,
       thumbnail_b64: thumb,
     }).eq('id', activeSlideId)
@@ -262,20 +262,20 @@ export const useSlideStore = create<SlideState>((set, get) => ({
 
   // ── Apply global style to all slides ─────────────────────────────────
   applyGlobalStyle: async (projectId, fabricCanvas, styleKey, styleValue) => {
-    const { slides, activeSlideId, saveActiveSlide } = get()
+    const { saveActiveSlide } = get()
 
     // Save current slide first
     await saveActiveSlide(fabricCanvas)
 
     // Update global_style on project
-    const { data: project } = await supabase
+    const { data: project } = await (supabase as any)
       .from('projects')
       .select('global_style')
       .eq('id', projectId)
       .single()
 
     const newGlobalStyle = { ...(project?.global_style ?? {}), [styleKey]: styleValue }
-    await supabase.from('projects').update({ global_style: newGlobalStyle }).eq('id', projectId)
+    await (supabase as any).from('projects').update({ global_style: newGlobalStyle }).eq('id', projectId)
 
     // For now we don't destructively rewrite each slide's canvas_state —
     // the global style is stored on the project and applied at render time.

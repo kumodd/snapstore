@@ -73,7 +73,6 @@ export default function ProfilePage() {
   const [avatarUrl, setAvatarUrl] = useState(profile?.avatar_url ?? '')
 
   // Password fields
-  const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showPw, setShowPw] = useState(false)
@@ -141,7 +140,7 @@ export default function ProfilePage() {
     const { error } = await updatePassword(newPassword)
     setIsChangingPw(false)
     if (error) { toast.error(error); return }
-    setCurrentPassword(''); setNewPassword(''); setConfirmPassword('')
+    setNewPassword(''); setConfirmPassword('')
     toast.success('Password changed successfully!')
   }
 
@@ -311,7 +310,7 @@ export default function ProfilePage() {
                   }
                 />
                 <FieldRow label="Member Since" value={memberSince} />
-                <FieldRow label="User ID" value={user?.id?.slice(0, 16) + '…' ?? '—'} />
+                <FieldRow label="User ID" value={user?.id ? user.id.slice(0, 16) + '…' : '—'} />
 
                 {/* Edit / Save buttons */}
                 <div className="flex items-center gap-3 pt-2 border-t border-white/5">

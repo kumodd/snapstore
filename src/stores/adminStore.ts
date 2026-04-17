@@ -91,7 +91,7 @@ export const useAdminStore = create<AdminStore>((set, get) => ({
   },
 
   loadDashboard: async () => {
-    const [users, growth, dist] = await Promise.all([
+    await Promise.all([
       get().loadUsers(),
       get().loadGrowth(30),
       (async () => {
@@ -147,7 +147,7 @@ export const useAdminStore = create<AdminStore>((set, get) => ({
   },
 
   updateUserPlan: async (userId, plan) => {
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from('profiles')
       .update({ plan })
       .eq('id', userId)
@@ -160,7 +160,7 @@ export const useAdminStore = create<AdminStore>((set, get) => ({
 
   banUser: async (userId) => {
     // Revoke session + flag in profiles (requires service role in production)
-    await supabase.from('profiles').update({ plan: 'free' }).eq('id', userId)
+    await (supabase as any).from('profiles').update({ plan: 'free' }).eq('id', userId)
   },
 
   sendNotification: async (userId, title, body) => {

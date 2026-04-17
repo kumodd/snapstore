@@ -3,10 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Users, BarChart3, TrendingUp, DollarSign, ShieldAlert,
-  Search, Filter, ArrowUpDown, ChevronLeft, ChevronRight,
-  Sparkles, ArrowLeft, Bell, Ban, RefreshCw, Crown,
+  Search, ArrowUpDown, ChevronLeft, ChevronRight,
+  ArrowLeft, Bell, Ban, RefreshCw, Crown,
   Activity, Package, Download, UserCheck, AlertTriangle,
-  X, Check, Send, ChevronDown, Eye, Settings
+  X, Send, Settings
 } from 'lucide-react'
 import { useAdminStore, type AdminUser } from '../../stores/adminStore'
 import { useAuthStore } from '../../stores/authStore'
@@ -33,7 +33,7 @@ function Sparkline({ data, color = '#6366f1' }: { data: number[]; color?: string
 }
 
 // ── Bar chart (simple SVG) ────────────────────────────────────────────
-function BarChart({ data, color = '#6366f1', label }: { data: { day: string; value: number }[]; color?: string; label: string }) {
+function BarChart({ data, color = '#6366f1' }: { data: { day: string; value: number }[]; color?: string }) {
   const max = Math.max(...data.map(d => d.value), 1)
   const w = 600, h = 120, pad = { t: 8, r: 8, b: 24, l: 32 }
   const barW = Math.max(4, ((w - pad.l - pad.r) / data.length) - 2)
@@ -621,7 +621,7 @@ export default function AdminPage() {
                       <span className="text-lg font-bold text-white">{total.toLocaleString()}</span>
                     </div>
                     <p className="text-[10px] text-slate-600 mb-3">Last {growthRange} days</p>
-                    <BarChart data={chartData} color={color} label={label} />
+                    <BarChart data={chartData} color={color} />
                   </div>
                 )
               })}
@@ -687,7 +687,7 @@ export default function AdminPage() {
                     </div>
                     <PlanBadge plan={u.plan} />
                     <span className="text-sm font-bold text-emerald-400 w-20 text-right">
-                      ₹{({ indie: '9.99', pro: '24.99', team: '79.99' }[u.plan] ?? '0')}
+                      ₹{({ free: '0', indie: '9.99', pro: '24.99', team: '79.99' } as Record<string, string>)[u.plan] ?? '0'}
                     </span>
                     <button
                       onClick={() => setPlanModal(u)}

@@ -6,7 +6,7 @@ import {
   Wand2, MousePointer2, Type, Square, Circle as CircleIcon,
   Image as ImageIcon, Save, CheckCircle2, AlertCircle,
   WifiOff, LayoutTemplate, Shapes, AlignLeft, Palette, UploadCloud,
-  Copy, Trash2, ChevronLeft, ChevronRight, Loader2, Plus, Minus,
+  Copy, Trash2, Loader2, Plus, Minus,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useEditorStore } from '../../stores/editorStore'
@@ -21,7 +21,7 @@ import AIComposerPanel from '../../components/ai/AIComposerPanel'
 import type { Project } from '../../lib/database.types'
 import toast from 'react-hot-toast'
 import clsx from 'clsx'
-import { Rect, Circle, IText, Image as FabricImage, Group } from 'fabric'
+import { Rect, Circle, IText, Image as FabricImage } from 'fabric'
 
 const DRAW_TOOLS = [
   { id: 'select', icon: MousePointer2, label: 'Select (V)' },
@@ -122,13 +122,13 @@ export default function EditorPage() {
       if (loaded.length === 0) {
         // Legacy project: migrate single canvas_state → first slide
         if ((project as any).canvas_state) {
-          const { data } = await supabase
+          const { data } = await (supabase as any)
             .from('slides')
             .insert({ project_id: project.id, position: 0, title: 'Main', canvas_state: (project as any).canvas_state })
             .select()
             .single()
           if (data) {
-            useSlideStore.setState({ slides: [data], activeSlideId: data.id })
+            useSlideStore.setState({ slides: [data], activeSlideId: (data as any).id })
             await fabricCanvas.loadFromJSON((project as any).canvas_state)
             fabricCanvas.renderAll()
           }
@@ -222,8 +222,6 @@ export default function EditorPage() {
     error: { icon: AlertCircle, text: 'Error', color: 'text-red-400' },
     offline: { icon: WifiOff, text: 'Offline', color: 'text-amber-400' },
   }[saveStatus]
-
-  const activeIndex = slides.findIndex(s => s.id === activeSlideId)
 
   // ── Loading Screen ────────────────────────────────────────────────────
   if (isLoading) {

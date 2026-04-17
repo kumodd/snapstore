@@ -15,6 +15,30 @@ export type Platform = 'ios' | 'android' | 'both'
 export interface Database {
   public: {
     Tables: {
+      admin_users: {
+        Row: {
+          id: string
+          role: string
+          created_at: string
+        }
+        Insert: Partial<Database['public']['Tables']['admin_users']['Row']>
+        Update: Partial<Database['public']['Tables']['admin_users']['Row']>
+      }
+      slides: {
+        Row: {
+          id: string
+          project_id: string
+          position: number
+          title: string
+          canvas_state: Json
+          thumbnail_b64: string | null
+          global_style: Json | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: Omit<Database['public']['Tables']['slides']['Row'], 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Database['public']['Tables']['slides']['Row']>
+      }
       profiles: {
         Row: {
           id: string
@@ -215,3 +239,5 @@ export type Notification = Database['public']['Tables']['notifications']['Row']
 export type ABVariant = Database['public']['Tables']['ab_variants']['Row']
 export type BrandKit = Database['public']['Tables']['brand_kits']['Row']
 export type ApiKey = Database['public']['Tables']['api_keys']['Row']
+export type Slide = Database['public']['Tables']['slides']['Row']
+export type AdminUser = Database['public']['Tables']['admin_users']['Row']
